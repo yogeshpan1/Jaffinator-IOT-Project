@@ -1,5 +1,5 @@
 # Jaffinator-IOT-Project
-Jaffinator is a compact device built using an ESP-32 microcontroller, a 2.3-inch TFT LCD
+Jaffinator (Based on Wifi Marauder / CapibaraZero) is a compact device built using an ESP-32 microcontroller, a 2.3-inch TFT LCD
 display, a LiPo battery, a TP4056 charging module, and a LoRa module, which together
 is a small , low-power, and long-range multi-functional device. Jaffinator is powered by
 firmware from the WiFi Marauder platform, allowing it to perform penetration-testing
