@@ -81,7 +81,6 @@ String macToString(uint8_t* mac) {
   return String(buf);
 }
 
-// getSafeInput: processes web server while waiting
 String getSafeInput() {
   String input = "";
   while (true) {
@@ -125,7 +124,6 @@ void drawMenu() {
   addLog("Menu displayed");
 }
 
-// ===== Wi‑Fi reconnection helper (Blynk removed) =====
 void reconnectWiFi() {
   if (WiFi.status() != WL_CONNECTED) {
     WiFi.mode(WIFI_STA);
@@ -141,6 +139,87 @@ void reconnectWiFi() {
       addLog("Wi‑Fi reconnection failed");
     }
   }
+}
+
+// ==================== NFC Magic Card Helpers =====================
+
+// Gen1A backdoor unlock sequence (raw commands)
+bool gen1aUnlock() {
+  uint8_t cmd1[] = { 0x40 };
+  uint8_t resp[16]; uint8_t respLen = sizeof(resp);
+  if (!nfc.inDataExchange(cmd1, 1, resp, &respLen)) return false;
+
+  uint8_t cmd2[] = { 0x43 };
+  respLen = sizeof(resp);
+  if (!nfc.inDataExchange(cmd2, 1, resp, &respLen)) return false;
+
+  return true;
+}
+
+// Writes a block without authentication (right after gen1aUnlock)
+bool gen1aWriteBlock(uint8_t blockNumber, uint8_t *data16) {
+  uint8_t cmd[18];
+  cmd[0] = 0xA0;
+  cmd[1] = blockNumber;
+  memcpy(cmd + 2, data16, 16);
+  uint8_t resp[16]; uint8_t respLen = sizeof(resp);
+  return nfc.inDataExchange(cmd, 18, resp, &respLen);
+}
+
+// Build a correct block 0 for a 4-byte UID (SAK=0x08, ATQA=0x0004)
+void buildBlock0(uint8_t *uid4, uint8_t *block0) {
+  memset(block0, 0xFF, 16);
+  memcpy(block0, uid4, 4);
+  block0[4] = uid4[0] ^ uid4[1] ^ uid4[2] ^ uid4[3]; // BCC
+  block0[5] = 0x08;                                   // SAK (MIFARE Classic 1K)
+  block0[6] = 0x04; block0[7] = 0x00;                 // ATQA
+  // bytes 8-15 left as 0xFF (common on magic cards)
+}
+
+// Main write function: tries Gen1A backdoor first, then Gen2/CUID fallback
+bool writeMagicUID(uint8_t *targetUID, uint8_t targetLen, uint8_t *newUID4) {
+  uint8_t block0[16];
+  buildBlock0(newUID4, block0);
+
+  // Try Gen1A backdoor
+  if (gen1aUnlock()) {
+    if (gen1aWriteBlock(0, block0)) {
+      addLog("Write succeeded via Gen1A backdoor");
+      return true;
+    }
+  }
+
+  // Fallback: Gen2/CUID (needs auth)
+  uint8_t keyA[6] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
+  uint8_t keyB[6] = {0x00,0x00,0x00,0x00,0x00,0x00};
+  bool authOK = nfc.mifareclassic_AuthenticateBlock(targetUID, targetLen, 0, 0, keyA)
+             || nfc.mifareclassic_AuthenticateBlock(targetUID, targetLen, 0, 1, keyB);
+  if (!authOK) {
+    addLog("writeMagicUID: auth failed (not Gen1A, not standard-keyed Gen2)");
+    return false;
+  }
+  if (nfc.mifareclassic_WriteDataBlock(0, block0)) {
+    addLog("Write succeeded via Gen2/CUID (auth+write)");
+    return true;
+  }
+  addLog("writeMagicUID: auth OK but block0 write failed");
+  return false;
+}
+
+// Verify written UID with retries (some cards need re-tap)
+bool verifyUID(uint8_t *expectedUID, uint8_t expectedLen) {
+  for (int attempt = 0; attempt < 4; attempt++) {
+    delay(400);
+    uint8_t vUID[7]; uint8_t vLen;
+    if (nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, vUID, &vLen, 1500)) {
+      if (vLen == expectedLen) {
+        bool match = true;
+        for (int i = 0; i < expectedLen; i++) if (vUID[i] != expectedUID[i]) match = false;
+        if (match) return true;
+      }
+    }
+  }
+  return false;
 }
 
 // ==================== Tools ====================
@@ -282,7 +361,7 @@ void runWiFiBeacon() {
   tft.fillScreen(ST77XX_BLACK);
 }
 
-// 3. BLE Windows Spam 
+// 3. BLE Windows Spam
 void runBLEWindowsSpam() {
   stopFlag = false; exitFlag = false;
   WiFi.mode(WIFI_OFF); delay(100);
@@ -345,14 +424,14 @@ void runBLEWindowsSpam() {
   }
   pAdv->stop();
   BLEDevice::deinit(false);
-  reconnectWiFi();   // re‑establish Wi‑Fi
+  reconnectWiFi();
   if (stopFlag) addLog("BLE Spam stopped by user");
   else if (exitFlag) addLog("BLE Spam exited to menu");
   else addLog("BLE Spam finished");
   tft.fillScreen(ST77XX_BLACK);
 }
 
-// 4. BLE Tracker 
+// 4. BLE Tracker
 void runBLETracker() {
   stopFlag = false; exitFlag = false;
   WiFi.mode(WIFI_OFF);
@@ -403,14 +482,14 @@ void runBLETracker() {
     if (webServerStarted) server.handleClient();
   }
   pBLEScan->stop(); BLEDevice::deinit(false);
-  reconnectWiFi();   // re‑establish Wi‑Fi
+  reconnectWiFi();
   if (stopFlag) addLog("BLE Tracker stopped by user");
   else if (exitFlag) addLog("BLE Tracker exited to menu");
   else addLog("BLE Tracker finished");
   tft.fillScreen(ST77XX_BLACK);
 }
 
-// 5. NFC Read
+// 5. NFC Read (unchanged)
 void runNFCRead() {
   stopFlag = false;
   exitFlag = false;
@@ -453,7 +532,6 @@ void runNFCRead() {
 
   while (!stopFlag && !exitFlag) {
 
-    // Animated dots
     tft.fillRect(130, 120, 70, 20, ST77XX_BLACK);
     tft.setCursor(130, 120);
     tft.setTextColor(ST77XX_GREEN);
@@ -602,7 +680,7 @@ void runNFCRead() {
   tft.fillScreen(ST77XX_BLACK);
 }
 
-// 6. NFC Clone
+// 6. NFC Clone (UPDATED with new magic card logic)
 void runNFCClone() {
   stopFlag = false; exitFlag = false;
   nfc.begin(); nfc.SAMConfig();
@@ -687,36 +765,24 @@ void runNFCClone() {
   tft.setCursor(10, 50); tft.setTextColor(ST77XX_CYAN); tft.setTextSize(1); tft.print("STEP 2  |  Writing to target...");
   tft.setCursor(10, 78); tft.setTextColor(ST77XX_YELLOW); tft.setTextSize(1); tft.print("Source UID:"); tft.setCursor(10, 90); tft.setTextColor(ST77XX_WHITE); tft.setTextSize(1); tft.print(uidStr);
   tft.setCursor(10, 108); tft.setTextColor(ST77XX_YELLOW); tft.setTextSize(1); tft.print("Target UID:"); tft.setCursor(10, 120); tft.setTextColor(ST77XX_WHITE); tft.setTextSize(1); tft.print(tStr);
-  tft.fillRect(30, 140, 260, 30, 0x2820); tft.drawRect(30, 140, 260, 30, ST77XX_YELLOW);
-  tft.setCursor(50, 149); tft.setTextColor(ST77XX_YELLOW); tft.setTextSize(2); tft.print("WRITING...");
 
-  uint8_t block0[16]; memset(block0, 0, 16);
-  memcpy(block0, storedUID, storedUIDLength);
-  if (storedUIDLength == 4) block0[4] = storedUID[0] ^ storedUID[1] ^ storedUID[2] ^ storedUID[3];
-  bool authOK = false;
-  uint8_t keyA[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-  uint8_t keyB[6] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
-  if (nfc.mifareclassic_AuthenticateBlock(tUID, tLen, 0, 0, keyA)) authOK = true;
-  else if (nfc.mifareclassic_AuthenticateBlock(tUID, tLen, 0, 1, keyB)) authOK = true;
-  if (!authOK) {
-    addLog("NFC Clone: Auth failed");
+  // --- NEW MAGIC WRITE LOGIC ---
+  if (storedUIDLength != 4) {
+    addLog("NFC Clone: source UID is not 4 bytes, unsupported for block0 rewrite");
     tft.fillScreen(ST77XX_BLACK);
     tft.fillRect(0, 0, 320, 45, ST77XX_RED);
     tft.setCursor(10, 8); tft.setTextColor(ST77XX_WHITE); tft.setTextSize(3); tft.print("[NFC CLONE]");
-    tft.fillRect(30, 90, 260, 80, 0x2000); tft.drawRect(30, 90, 260, 80, ST77XX_RED);
-    tft.setCursor(40, 103); tft.setTextColor(ST77XX_RED); tft.setTextSize(2); tft.print("AUTH FAILED");
-    tft.setCursor(40, 130); tft.setTextColor(ST77XX_WHITE); tft.setTextSize(1); tft.print("Card may be locked or not");
-    tft.setCursor(40, 144); tft.print("a Gen2/Magic writable card.");
-    delay(3000);
+    tft.fillRect(30, 90, 260, 60, 0x2000); tft.drawRect(30, 90, 260, 60, ST77XX_RED);
+    tft.setCursor(40, 103); tft.setTextColor(ST77XX_RED); tft.setTextSize(2); tft.print("UNSUPPORTED");
+    tft.setCursor(30, 130); tft.setTextColor(ST77XX_WHITE); tft.setTextSize(1); tft.print("Only 4-byte UID source cards");
+    tft.setCursor(30, 143); tft.print("can be cloned by this method.");
+    delay(2500);
     tft.fillScreen(ST77XX_BLACK); return;
   }
-  if (nfc.mifareclassic_WriteDataBlock(0, block0)) {
-    delay(500);
-    uint8_t vUID[7]; uint8_t vLen; bool verified = false;
-    if (nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, vUID, &vLen, 2000)) {
-      verified = (vLen == storedUIDLength);
-      if (verified) for (int i = 0; i < storedUIDLength; i++) if (vUID[i] != storedUID[i]) verified = false;
-    }
+
+  bool wrote = writeMagicUID(tUID, tLen, storedUID);
+  if (wrote) {
+    bool verified = verifyUID(storedUID, storedUIDLength);
     if (verified) {
       addLog("Clone SUCCESS! UID: " + uidStr);
       tft.fillScreen(ST77XX_BLACK);
@@ -728,31 +794,31 @@ void runNFCClone() {
       tft.setCursor(70, 92); tft.setTextColor(ST77XX_GREEN); tft.setTextSize(3); tft.print("SUCCESS");
       tft.setCursor(10, 145); tft.setTextColor(ST77XX_YELLOW); tft.setTextSize(1); tft.print("Written UID:"); tft.setCursor(10, 158); tft.setTextColor(ST77XX_WHITE); tft.print(uidStr);
     } else {
-      addLog("Clone write done but verify mismatch");
+      addLog("Clone write done but could not verify - try removing and re-tapping card");
       tft.fillScreen(ST77XX_BLACK);
       tft.fillRect(0, 0, 320, 45, 0x780F);
       tft.setCursor(10, 8); tft.setTextColor(ST77XX_WHITE); tft.setTextSize(3); tft.print("[NFC CLONE]");
       tft.fillRect(0, 45, 320, 20, 0x2000);
-      tft.setCursor(10, 50); tft.setTextColor(ST77XX_WHITE); tft.setTextSize(1); tft.print("Written but UID mismatch on verify");
+      tft.setCursor(10, 50); tft.setTextColor(ST77XX_WHITE); tft.setTextSize(1); tft.print("Written, but verify inconclusive");
       tft.fillRect(30, 80, 260, 50, 0x2000); tft.drawRect(30, 80, 260, 50, ST77XX_RED);
-      tft.setCursor(25, 92); tft.setTextColor(ST77XX_RED); tft.setTextSize(2); tft.print("VERIFY FAIL");
-      tft.setCursor(10, 145); tft.setTextColor(ST77XX_WHITE); tft.setTextSize(1); tft.print("Re-scan card to confirm.");
+      tft.setCursor(25, 92); tft.setTextColor(ST77XX_RED); tft.setTextSize(2); tft.print("RECHECK");
+      tft.setCursor(10, 145); tft.setTextColor(ST77XX_WHITE); tft.setTextSize(1); tft.print("Remove card, re-tap to confirm.");
     }
   } else {
-    addLog("NFC Clone: Write failed");
+    addLog("NFC Clone: Write failed (not a recognized magic card)");
     tft.fillScreen(ST77XX_BLACK);
     tft.fillRect(0, 0, 320, 45, ST77XX_RED);
     tft.setCursor(10, 8); tft.setTextColor(ST77XX_WHITE); tft.setTextSize(3); tft.print("[NFC CLONE]");
     tft.fillRect(30, 80, 260, 65, 0x2000); tft.drawRect(30, 80, 260, 65, ST77XX_RED);
     tft.setCursor(30, 93); tft.setTextColor(ST77XX_RED); tft.setTextSize(2); tft.print("WRITE FAIL");
-    tft.setCursor(30, 120); tft.setTextColor(ST77XX_WHITE); tft.setTextSize(1); tft.print("Card may be locked or not");
-    tft.setCursor(30, 133); tft.print("a writable Magic/Gen2 card.");
+    tft.setCursor(30, 120); tft.setTextColor(ST77XX_WHITE); tft.setTextSize(1); tft.print("Not a Gen1A/Gen2 writable card,");
+    tft.setCursor(30, 133); tft.print("or UID is locked.");
   }
   delay(3000);
   tft.fillScreen(ST77XX_BLACK);
 }
 
-// 7. Manual UID Write
+// 7. Manual UID Write (UPDATED with new magic card logic)
 void runManualUIDUpdate() {
   stopFlag = false; exitFlag = false;
   nfc.begin(); nfc.SAMConfig();
@@ -882,55 +948,25 @@ void runManualUIDUpdate() {
   tft.fillRect(0, 0, 320, 45, 0x03EF);
   tft.setCursor(10, 8); tft.setTextColor(ST77XX_WHITE); tft.setTextSize(3); tft.print("[MAN. UID]");
   tft.fillRect(0, 45, 320, 20, 0x1082);
-  tft.setCursor(10, 50); tft.setTextColor(ST77XX_CYAN); tft.setTextSize(1); tft.print("Target found  |  Authenticating...");
-  tft.setCursor(10, 78); tft.setTextColor(ST77XX_YELLOW); tft.setTextSize(1); tft.print("Write UID:"); tft.setCursor(10, 90); tft.setTextColor(ST77XX_WHITE); tft.setTextSize(1); tft.print(uidStr);
-  tft.setCursor(10, 108); tft.setTextColor(ST77XX_YELLOW); tft.setTextSize(1); tft.print("Target UID:"); tft.setCursor(10, 120); tft.setTextColor(ST77XX_WHITE); tft.setTextSize(1); tft.print(tStr);
-  tft.fillRect(30, 140, 260, 30, 0x2820); tft.drawRect(30, 140, 260, 30, ST77XX_YELLOW);
-  tft.setCursor(40, 149); tft.setTextColor(ST77XX_YELLOW); tft.setTextSize(2); tft.print("TRYING KEYS...");
-  const uint8_t keyList[][6] = {{0xFF,0xFF,0xFF,0xFF,0xFF,0xFF},{0x00,0x00,0x00,0x00,0x00,0x00},{0xA0,0xA1,0xA2,0xA3,0xA4,0xA5},{0xD3,0xF7,0xD3,0xF7,0xD3,0xF7}};
-  const int numKeys = sizeof(keyList) / sizeof(keyList[0]);
-  bool authOK = false;
-  for (int k = 0; k < numKeys && !authOK; k++) {
-    tft.fillRect(10, 178, 300, 14, ST77XX_BLACK);
-    tft.setCursor(10, 179); tft.setTextColor(ST77XX_CYAN); tft.setTextSize(1);
-    tft.print("Key "); tft.print(k + 1); tft.print("/"); tft.print(numKeys); tft.print(": ");
-    for (int b = 0; b < 6; b++) {
-      if (keyList[k][b] < 0x10) tft.print("0");
-      tft.print(keyList[k][b], HEX); tft.print(" ");
-    }
-    if (nfc.mifareclassic_AuthenticateBlock(tUID, tLen, 0, 0, (uint8_t*)keyList[k])) {
-      authOK = true; addLog("Manual UID auth OK with key A #" + String(k+1));
-    } else if (nfc.mifareclassic_AuthenticateBlock(tUID, tLen, 0, 1, (uint8_t*)keyList[k])) {
-      authOK = true; addLog("Manual UID auth OK with key B #" + String(k+1));
-    }
-    if (!authOK) delay(50);
-  }
-  if (!authOK) {
-    addLog("Manual UID: All auth attempts failed");
+  tft.setCursor(10, 50); tft.setTextColor(ST77XX_CYAN); tft.setTextSize(1); tft.print("Target found  |  Writing...");
+
+  // --- NEW MAGIC WRITE LOGIC ---
+  if (uidLen != 4) {
+    addLog("Manual UID: only 4-byte UIDs are supported for block 0 rewrite");
     tft.fillScreen(ST77XX_BLACK);
     tft.fillRect(0, 0, 320, 45, ST77XX_RED);
     tft.setCursor(10, 8); tft.setTextColor(ST77XX_WHITE); tft.setTextSize(3); tft.print("[MAN. UID]");
-    tft.fillRect(30, 80, 260, 80, 0x2000); tft.drawRect(30, 80, 260, 80, ST77XX_RED);
-    tft.setCursor(40, 93); tft.setTextColor(ST77XX_RED); tft.setTextSize(2); tft.print("AUTH FAILED");
-    tft.setCursor(30, 125); tft.setTextColor(ST77XX_WHITE); tft.setTextSize(1); tft.print("All keys exhausted.");
-    tft.setCursor(30, 139); tft.print("Card may be locked or not");
-    tft.setCursor(30, 152); tft.print("a Gen2/Magic writable card.");
-    delay(3000);
+    tft.fillRect(30, 90, 260, 60, 0x2000); tft.drawRect(30, 90, 260, 60, ST77XX_RED);
+    tft.setCursor(40, 103); tft.setTextColor(ST77XX_RED); tft.setTextSize(2); tft.print("UNSUPPORTED");
+    tft.setCursor(30, 130); tft.setTextColor(ST77XX_WHITE); tft.setTextSize(1); tft.print("Only 4-byte UIDs can be");
+    tft.setCursor(30, 143); tft.print("written with this method.");
+    delay(2500);
     tft.fillScreen(ST77XX_BLACK); return;
   }
-  tft.fillRect(30, 140, 260, 55, 0x2820); tft.drawRect(30, 140, 260, 55, ST77XX_YELLOW);
-  tft.setCursor(55, 152); tft.setTextColor(ST77XX_YELLOW); tft.setTextSize(2); tft.print("WRITING...");
-  tft.setCursor(40, 178); tft.setTextColor(ST77XX_WHITE); tft.setTextSize(1); tft.print("Auth OK  |  Writing block 0...");
-  uint8_t block0[16]; memset(block0, 0, 16);
-  memcpy(block0, newUID, uidLen);
-  if (uidLen == 4) block0[4] = newUID[0] ^ newUID[1] ^ newUID[2] ^ newUID[3];
-  if (nfc.mifareclassic_WriteDataBlock(0, block0)) {
-    delay(500);
-    uint8_t vUID[7]; uint8_t vLen; bool verified = false;
-    if (nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, vUID, &vLen, 2000)) {
-      verified = (vLen == uidLen);
-      if (verified) for (int i = 0; i < uidLen; i++) if (vUID[i] != newUID[i]) verified = false;
-    }
+
+  bool wrote = writeMagicUID(tUID, tLen, newUID);
+  if (wrote) {
+    bool verified = verifyUID(newUID, uidLen);
     if (verified) {
       addLog("Manual UID SUCCESS! UID: " + uidStr);
       tft.fillScreen(ST77XX_BLACK);
@@ -942,25 +978,25 @@ void runManualUIDUpdate() {
       tft.setCursor(70, 92); tft.setTextColor(ST77XX_GREEN); tft.setTextSize(3); tft.print("SUCCESS");
       tft.setCursor(10, 145); tft.setTextColor(ST77XX_YELLOW); tft.setTextSize(1); tft.print("Written UID:"); tft.setCursor(10, 158); tft.setTextColor(ST77XX_WHITE); tft.print(uidStr);
     } else {
-      addLog("Manual UID write done but verify mismatch");
+      addLog("Manual UID write done but verify inconclusive");
       tft.fillScreen(ST77XX_BLACK);
       tft.fillRect(0, 0, 320, 45, 0x03EF);
       tft.setCursor(10, 8); tft.setTextColor(ST77XX_WHITE); tft.setTextSize(3); tft.print("[MAN. UID]");
       tft.fillRect(0, 45, 320, 20, 0x2000);
-      tft.setCursor(10, 50); tft.setTextColor(ST77XX_WHITE); tft.setTextSize(1); tft.print("Written but verify mismatch");
+      tft.setCursor(10, 50); tft.setTextColor(ST77XX_WHITE); tft.setTextSize(1); tft.print("Written, but verify inconclusive");
       tft.fillRect(30, 80, 260, 50, 0x2000); tft.drawRect(30, 80, 260, 50, ST77XX_RED);
-      tft.setCursor(25, 92); tft.setTextColor(ST77XX_RED); tft.setTextSize(2); tft.print("VERIFY FAIL");
-      tft.setCursor(10, 145); tft.setTextColor(ST77XX_WHITE); tft.setTextSize(1); tft.print("Re-scan card to check.");
+      tft.setCursor(25, 92); tft.setTextColor(ST77XX_RED); tft.setTextSize(2); tft.print("RECHECK");
+      tft.setCursor(10, 145); tft.setTextColor(ST77XX_WHITE); tft.setTextSize(1); tft.print("Remove card, re-tap to confirm.");
     }
   } else {
-    addLog("Manual UID write failed");
+    addLog("Manual UID write failed (not a recognized magic card)");
     tft.fillScreen(ST77XX_BLACK);
     tft.fillRect(0, 0, 320, 45, ST77XX_RED);
     tft.setCursor(10, 8); tft.setTextColor(ST77XX_WHITE); tft.setTextSize(3); tft.print("[MAN. UID]");
     tft.fillRect(30, 80, 260, 65, 0x2000); tft.drawRect(30, 80, 260, 65, ST77XX_RED);
     tft.setCursor(30, 93); tft.setTextColor(ST77XX_RED); tft.setTextSize(2); tft.print("WRITE FAIL");
-    tft.setCursor(30, 125); tft.setTextColor(ST77XX_WHITE); tft.setTextSize(1); tft.print("Card may be locked or not");
-    tft.setCursor(30, 138); tft.print("a writable Magic/Gen2 card.");
+    tft.setCursor(30, 120); tft.setTextColor(ST77XX_WHITE); tft.setTextSize(1); tft.print("Not a Gen1A/Gen2 writable card,");
+    tft.setCursor(30, 133); tft.print("or UID is locked.");
   }
   delay(3000);
   tft.fillScreen(ST77XX_BLACK);
