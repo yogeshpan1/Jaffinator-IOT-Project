@@ -1,7 +1,3 @@
-#define BLYNK_TEMPLATE_ID ""
-#define BLYNK_TEMPLATE_NAME "Jaffinator"
-#define BLYNK_AUTH_TOKEN    "" 
-
 #include <WiFi.h>
 #include <esp_wifi.h>
 #include <WebServer.h>
@@ -14,24 +10,10 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_ST7789.h>
 #include <ctype.h>
-#include <BlynkSimpleEsp32.h>
 
 // ===== Wi‑Fi Credentials =====
-char ssid[] = "";
-char pass[] = "";
-
-// ===== Blynk V‑pins =====
-#define VP_WIFI_SCAN   V0
-#define VP_BEACON      V1
-#define VP_BLE_SPAM    V2
-#define VP_BLE_TRACK   V3
-#define VP_NFC_READ    V4
-#define VP_NFC_CLONE   V5
-#define VP_MANUAL_UID  V6
-#define VP_SIGNAL      V7
-#define VP_SNIFFER     V8
-#define VP_STOP        V9
-#define VP_STATUS      V10
+char ssid[] = "Mero Net";
+char pass[] = "af25g+40Nb5wpbu";
 
 // ===== Hardware =====
 #define TFT_CS   15
@@ -99,7 +81,7 @@ String macToString(uint8_t* mac) {
   return String(buf);
 }
 
-// FIXED: getSafeInput now processes Blynk and web while waiting
+// getSafeInput: processes web server while waiting
 String getSafeInput() {
   String input = "";
   while (true) {
@@ -111,8 +93,6 @@ String getSafeInput() {
         input = "";
       } else input += c;
     }
-    // Process Blynk and web events while waiting
-    Blynk.run();
     if (webServerStarted) server.handleClient();
     delay(10);
     if (Serial.available() && Serial.peek() == 'm') {
@@ -145,13 +125,30 @@ void drawMenu() {
   addLog("Menu displayed");
 }
 
+// ===== Wi‑Fi reconnection helper (Blynk removed) =====
+void reconnectWiFi() {
+  if (WiFi.status() != WL_CONNECTED) {
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(ssid, pass);
+    int tries = 0;
+    while (WiFi.status() != WL_CONNECTED && tries < 30) {
+      delay(500);
+      tries++;
+    }
+    if (WiFi.status() == WL_CONNECTED) {
+      addLog("Wi‑Fi reconnected: " + WiFi.localIP().toString());
+    } else {
+      addLog("Wi‑Fi reconnection failed");
+    }
+  }
+}
+
 // ==================== Tools ====================
 
 // 1. WiFi Scan
 void runWiFiScan() {
   stopFlag = false; exitFlag = false;
   WiFi.mode(WIFI_STA); WiFi.disconnect();
-  Blynk.virtualWrite(VP_STATUS, "Running: WiFi Scan");
   addLog("WiFi Scan started");
   tft.fillScreen(ST77XX_BLACK);
   tft.fillRect(0, 0, 320, 45, ST77XX_GREEN);
@@ -198,7 +195,6 @@ void runWiFiScan() {
         if (c == 'm' || c == 'M') { exitFlag = true; break; }
         if (c == 's' || c == 'S') { stopFlag = true; break; }
       }
-      Blynk.run();
       if (webServerStarted) server.handleClient();
       delay(100);
     }
@@ -206,7 +202,6 @@ void runWiFiScan() {
   if (stopFlag) addLog("WiFi Scan stopped by user");
   else if (exitFlag) addLog("WiFi Scan exited to menu");
   else addLog("WiFi Scan finished");
-  Blynk.virtualWrite(VP_STATUS, "Idle");
   tft.fillScreen(ST77XX_BLACK);
 }
 
@@ -216,7 +211,6 @@ void runWiFiBeacon() {
   WiFi.mode(WIFI_AP); WiFi.disconnect(); delay(100);
   esp_wifi_set_promiscuous(true);
   esp_wifi_set_channel(1, WIFI_SECOND_CHAN_NONE);
-  Blynk.virtualWrite(VP_STATUS, "Running: Beacon Spam");
   addLog("Beacon Spam started");
   tft.fillScreen(ST77XX_BLACK);
   tft.fillRect(0, 0, 320, 45, ST77XX_RED);
@@ -279,22 +273,19 @@ void runWiFiBeacon() {
       if (c == 'm' || c == 'M') { exitFlag = true; break; }
       if (c == 's' || c == 'S') { stopFlag = true; break; }
     }
-    Blynk.run();
     if (webServerStarted) server.handleClient();
   }
   esp_wifi_set_promiscuous(false);
   if (stopFlag) addLog("Beacon Spam stopped by user");
   else if (exitFlag) addLog("Beacon Spam exited to menu");
   else addLog("Beacon Spam finished");
-  Blynk.virtualWrite(VP_STATUS, "Idle");
   tft.fillScreen(ST77XX_BLACK);
 }
 
-// 3. BLE Windows Spam
+// 3. BLE Windows Spam 
 void runBLEWindowsSpam() {
   stopFlag = false; exitFlag = false;
   WiFi.mode(WIFI_OFF); delay(100);
-  Blynk.virtualWrite(VP_STATUS, "Running: BLE Spam");
   addLog("BLE Windows Spam started");
   BLEDevice::init("Jaffinator_Win");
   BLEAdvertising *pAdv = BLEDevice::getAdvertising();
@@ -350,20 +341,18 @@ void runBLEWindowsSpam() {
       if (c == 'm' || c == 'M') { exitFlag = true; break; }
       if (c == 's' || c == 'S') { stopFlag = true; break; }
     }
-    Blynk.run();
     if (webServerStarted) server.handleClient();
   }
   pAdv->stop();
   BLEDevice::deinit(false);
-  WiFi.mode(WIFI_STA);
+  reconnectWiFi();   // re‑establish Wi‑Fi
   if (stopFlag) addLog("BLE Spam stopped by user");
   else if (exitFlag) addLog("BLE Spam exited to menu");
   else addLog("BLE Spam finished");
-  Blynk.virtualWrite(VP_STATUS, "Idle");
   tft.fillScreen(ST77XX_BLACK);
 }
 
-// 4. BLE Tracker
+// 4. BLE Tracker 
 void runBLETracker() {
   stopFlag = false; exitFlag = false;
   WiFi.mode(WIFI_OFF);
@@ -372,7 +361,6 @@ void runBLETracker() {
   pBLEScan->setActiveScan(true);
   pBLEScan->setInterval(100);
   pBLEScan->setWindow(99);
-  Blynk.virtualWrite(VP_STATUS, "Running: BLE Tracker");
   addLog("BLE Tracker started");
   tft.fillScreen(ST77XX_BLACK);
   tft.fillRect(0, 0, 320, 36, ST77XX_BLUE);
@@ -412,71 +400,205 @@ void runBLETracker() {
       if (c == 'm' || c == 'M') { exitFlag = true; break; }
       if (c == 's' || c == 'S') { stopFlag = true; break; }
     }
-    Blynk.run();
     if (webServerStarted) server.handleClient();
   }
-  pBLEScan->stop(); BLEDevice::deinit(false); WiFi.mode(WIFI_STA);
+  pBLEScan->stop(); BLEDevice::deinit(false);
+  reconnectWiFi();   // re‑establish Wi‑Fi
   if (stopFlag) addLog("BLE Tracker stopped by user");
   else if (exitFlag) addLog("BLE Tracker exited to menu");
   else addLog("BLE Tracker finished");
-  Blynk.virtualWrite(VP_STATUS, "Idle");
   tft.fillScreen(ST77XX_BLACK);
 }
 
 // 5. NFC Read
 void runNFCRead() {
-  stopFlag = false; exitFlag = false;
-  nfc.begin(); nfc.SAMConfig();
-  Blynk.virtualWrite(VP_STATUS, "Running: NFC Read");
+  stopFlag = false;
+  exitFlag = false;
+
+  nfc.begin();
+  nfc.SAMConfig();
+
   addLog("NFC Read started");
+
   tft.fillScreen(ST77XX_BLACK);
+
   tft.fillRect(0, 0, 320, 45, ST77XX_RED);
-  tft.setCursor(10, 8); tft.setTextColor(ST77XX_WHITE); tft.setTextSize(3); tft.print("[ NFC READ ]");
+  tft.setCursor(10, 8);
+  tft.setTextColor(ST77XX_WHITE);
+  tft.setTextSize(3);
+  tft.print("[ NFC READ ]");
+
   tft.fillRect(0, 45, 320, 20, 0x1082);
-  tft.setCursor(10, 50); tft.setTextColor(ST77XX_CYAN); tft.setTextSize(1); tft.print("Waiting for tag...");
+  tft.setCursor(10, 50);
+  tft.setTextColor(ST77XX_CYAN);
+  tft.setTextSize(1);
+  tft.print("Waiting for tag...");
+
   tft.drawRect(10, 75, 300, 30, ST77XX_YELLOW);
-  tft.setCursor(20, 83); tft.setTextColor(ST77XX_YELLOW); tft.setTextSize(1); tft.print("Place tag on reader  |  's'=stop  'm'=menu");
-  tft.setCursor(10, 120); tft.setTextColor(ST77XX_GREEN); tft.setTextSize(2); tft.print("Scanning");
-  int dotCount = 0;
+  tft.setCursor(20, 83);
+  tft.setTextColor(ST77XX_YELLOW);
+  tft.setTextSize(1);
+  tft.print("Place tag on reader | 'S'=Stop | 'M'=Menu");
+
+  tft.setCursor(10, 120);
+  tft.setTextColor(ST77XX_GREEN);
+  tft.setTextSize(2);
+  tft.print("Scanning");
+
+  int dots = 0;
+
+  uint8_t lastUID[7];
+  uint8_t lastUIDLen = 0;
+  bool cardPresent = false;
+
   while (!stopFlag && !exitFlag) {
-    tft.fillRect(130, 120, 80, 20, ST77XX_BLACK);
-    tft.setCursor(130, 120); tft.setTextColor(ST77XX_GREEN); tft.setTextSize(2);
-    for (int d = 0; d <= (dotCount % 4); d++) tft.print(".");
-    dotCount++;
-    uint8_t uid[7]; uint8_t uidLen = 0;
-    if (nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, uid, &uidLen, 500)) {
-      memcpy(storedUID, uid, uidLen);
-      storedUIDLength = uidLen;
-      String uidStr = "";
-      for (int i = 0; i < uidLen; i++) {
-        if (uid[i] < 0x10) uidStr += "0";
-        uidStr += String(uid[i], HEX);
-        if (i < uidLen - 1) uidStr += ":";
+
+    // Animated dots
+    tft.fillRect(130, 120, 70, 20, ST77XX_BLACK);
+    tft.setCursor(130, 120);
+    tft.setTextColor(ST77XX_GREEN);
+    tft.setTextSize(2);
+
+    for (int i = 0; i <= (dots % 3); i++)
+      tft.print(".");
+
+    dots++;
+
+    uint8_t uid[7];
+    uint8_t uidLen = 0;
+
+    if (nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, uid, &uidLen, 200)) {
+
+      bool sameCard =
+          (cardPresent &&
+           uidLen == lastUIDLen &&
+           memcmp(uid, lastUID, uidLen) == 0);
+
+      if (!sameCard) {
+
+        memcpy(lastUID, uid, uidLen);
+        lastUIDLen = uidLen;
+        cardPresent = true;
+
+        memcpy(storedUID, uid, uidLen);
+        storedUIDLength = uidLen;
+
+        String uidHex = "";
+        String uidDec = "";
+
+        for (int i = 0; i < uidLen; i++) {
+
+          if (uid[i] < 0x10)
+            uidHex += "0";
+
+          uidHex += String(uid[i], HEX);
+
+          if (i < uidLen - 1) {
+            uidHex += ":";
+            uidDec += ".";
+          }
+
+          uidDec += String(uid[i]);
+        }
+
+        uidHex.toUpperCase();
+
+        addLog("NFC Tag: " + uidHex);
+
+        Serial.println();
+        Serial.println("===== NFC TAG =====");
+        Serial.print("UID (HEX): ");
+        Serial.println(uidHex);
+
+        Serial.print("UID (DEC): ");
+        Serial.println(uidDec);
+
+        Serial.print("Length : ");
+        Serial.print(uidLen);
+        Serial.println(" bytes");
+
+        Serial.println("Protocol: ISO14443A");
+        Serial.println("===================");
+
+        tft.fillRect(0, 145, 320, 95, ST77XX_BLACK);
+
+        tft.fillRect(0, 145, 320, 20, 0x0380);
+
+        tft.setCursor(10, 150);
+        tft.setTextColor(ST77XX_WHITE);
+        tft.setTextSize(1);
+        tft.print("TAG DETECTED");
+
+        tft.setCursor(10, 172);
+        tft.setTextColor(ST77XX_YELLOW);
+        tft.setTextSize(2);
+        tft.print("UID:");
+
+        tft.setCursor(10, 195);
+        tft.setTextColor(ST77XX_WHITE);
+        tft.setTextSize(2);
+        tft.print(uidHex);
+
+        tft.fillRect(0, 220, 320, 20, 0x1082);
+
+        tft.setCursor(10, 224);
+        tft.setTextColor(ST77XX_CYAN);
+        tft.setTextSize(1);
+
+        tft.print(uidLen);
+        tft.print("-Byte | ISO14443A");
       }
-      addLog("NFC tag read: " + uidStr);
-      tft.fillRect(0, 115, 320, 125, ST77XX_BLACK);
-      tft.fillRect(0, 115, 320, 25, 0x0380);
-      tft.setCursor(10, 121); tft.setTextColor(ST77XX_WHITE); tft.setTextSize(1); tft.print("TAG DETECTED");
-      tft.setCursor(10, 148); tft.setTextColor(ST77XX_YELLOW); tft.setTextSize(2); tft.print("UID:");
-      tft.setCursor(10, 175); tft.setTextColor(ST77XX_WHITE); tft.setTextSize(2);
-      tft.print(uidStr);
-      tft.fillRect(0, 205, 320, 20, 0x1082);
-      tft.setCursor(10, 209); tft.setTextColor(ST77XX_CYAN); tft.setTextSize(1);
-      tft.print(uidLen * 8); tft.print("-bit  |  ISO14443A  |  Cached for clone");
+
+    } else {
+
+      if (cardPresent) {
+
+        cardPresent = false;
+        lastUIDLen = 0;
+
+        tft.fillRect(0, 145, 320, 95, ST77XX_BLACK);
+
+        tft.fillRect(0, 145, 320, 20, 0x1082);
+
+        tft.setCursor(10, 150);
+        tft.setTextColor(ST77XX_CYAN);
+        tft.setTextSize(1);
+        tft.print("Waiting for next tag...");
+
+        addLog("Tag removed");
+      }
     }
+
     if (Serial.available()) {
-      char c = Serial.read();
-      if (toupper(c) == 'M') { exitFlag = true; break; }
-      if (toupper(c) == 'S') { stopFlag = true; break; }
+
+      char c = toupper(Serial.read());
+
+      if (c == 'S') {
+        stopFlag = true;
+        break;
+      }
+
+      if (c == 'M') {
+        exitFlag = true;
+        break;
+      }
     }
-    Blynk.run();
-    if (webServerStarted) server.handleClient();
-    delay(100);
+
+    if (webServerStarted)
+      server.handleClient();
+
+    delay(30);
   }
-  if (stopFlag) addLog("NFC Read stopped by user");
-  else if (exitFlag) addLog("NFC Read exited to menu");
-  else addLog("NFC Read finished");
-  Blynk.virtualWrite(VP_STATUS, "Idle");
+
+  if (stopFlag)
+    addLog("NFC Read stopped");
+
+  else if (exitFlag)
+    addLog("NFC Read exited");
+
+  else
+    addLog("NFC Read finished");
+
   tft.fillScreen(ST77XX_BLACK);
 }
 
@@ -484,7 +606,6 @@ void runNFCRead() {
 void runNFCClone() {
   stopFlag = false; exitFlag = false;
   nfc.begin(); nfc.SAMConfig();
-  Blynk.virtualWrite(VP_STATUS, "Running: NFC Clone");
   addLog("NFC Clone started");
   tft.fillScreen(ST77XX_BLACK);
   tft.fillRect(0, 0, 320, 45, 0x780F);
@@ -508,7 +629,6 @@ void runNFCClone() {
     tft.setCursor(60, 103); tft.setTextColor(ST77XX_RED); tft.setTextSize(2); tft.print("TIMEOUT!");
     tft.setCursor(30, 130); tft.setTextColor(ST77XX_WHITE); tft.setTextSize(1); tft.print("No source tag detected.");
     delay(2000);
-    Blynk.virtualWrite(VP_STATUS, "Idle");
     tft.fillScreen(ST77XX_BLACK); return;
   }
   String uidStr = "";
@@ -552,7 +672,6 @@ void runNFCClone() {
     tft.setCursor(30, 103); tft.setTextColor(ST77XX_RED); tft.setTextSize(2); tft.print("NO CARD!");
     tft.setCursor(30, 130); tft.setTextColor(ST77XX_WHITE); tft.setTextSize(1); tft.print("No target card detected.");
     delay(2000);
-    Blynk.virtualWrite(VP_STATUS, "Idle");
     tft.fillScreen(ST77XX_BLACK); return;
   }
   String tStr = "";
@@ -589,7 +708,6 @@ void runNFCClone() {
     tft.setCursor(40, 130); tft.setTextColor(ST77XX_WHITE); tft.setTextSize(1); tft.print("Card may be locked or not");
     tft.setCursor(40, 144); tft.print("a Gen2/Magic writable card.");
     delay(3000);
-    Blynk.virtualWrite(VP_STATUS, "Idle");
     tft.fillScreen(ST77XX_BLACK); return;
   }
   if (nfc.mifareclassic_WriteDataBlock(0, block0)) {
@@ -631,7 +749,6 @@ void runNFCClone() {
     tft.setCursor(30, 133); tft.print("a writable Magic/Gen2 card.");
   }
   delay(3000);
-  Blynk.virtualWrite(VP_STATUS, "Idle");
   tft.fillScreen(ST77XX_BLACK);
 }
 
@@ -639,7 +756,6 @@ void runNFCClone() {
 void runManualUIDUpdate() {
   stopFlag = false; exitFlag = false;
   nfc.begin(); nfc.SAMConfig();
-  Blynk.virtualWrite(VP_STATUS, "Running: Manual UID");
   addLog("Manual UID started");
   tft.fillScreen(ST77XX_BLACK);
   tft.fillRect(0, 0, 320, 45, 0x03EF);
@@ -680,11 +796,9 @@ void runManualUIDUpdate() {
       tft.fillScreen(ST77XX_BLACK);
       tft.setCursor(10, 120); tft.setTextColor(ST77XX_YELLOW); tft.setTextSize(2); tft.print("Cancelled");
       delay(1000);
-      Blynk.virtualWrite(VP_STATUS, "Idle");
       tft.fillScreen(ST77XX_BLACK);
       return;
     }
-    Blynk.run();
     if (webServerStarted) server.handleClient();
     delay(10);
   }
@@ -697,7 +811,6 @@ void runManualUIDUpdate() {
     tft.fillRect(30, 90, 260, 50, 0x2000); tft.drawRect(30, 90, 260, 50, ST77XX_RED);
     tft.setCursor(50, 103); tft.setTextColor(ST77XX_RED); tft.setTextSize(2); tft.print("NO INPUT");
     delay(2000);
-    Blynk.virtualWrite(VP_STATUS, "Idle");
     tft.fillScreen(ST77XX_BLACK); return;
   }
   uint8_t newUID[7]; int uidLen = 0;
@@ -726,7 +839,6 @@ void runManualUIDUpdate() {
     tft.setCursor(30, 130); tft.setTextColor(ST77XX_WHITE); tft.setTextSize(1); tft.print("Could not parse hex UID.");
     tft.setCursor(30, 143); tft.print("Try: DE AD BE EF");
     delay(2000);
-    Blynk.virtualWrite(VP_STATUS, "Idle");
     tft.fillScreen(ST77XX_BLACK); return;
   }
   String uidStr = "";
@@ -758,7 +870,6 @@ void runManualUIDUpdate() {
     tft.setCursor(50, 103); tft.setTextColor(ST77XX_RED); tft.setTextSize(2); tft.print("TIMEOUT");
     tft.setCursor(30, 135); tft.setTextColor(ST77XX_WHITE); tft.setTextSize(1); tft.print("No target card detected.");
     delay(2000);
-    Blynk.virtualWrite(VP_STATUS, "Idle");
     tft.fillScreen(ST77XX_BLACK); return;
   }
   String tStr = "";
@@ -805,7 +916,6 @@ void runManualUIDUpdate() {
     tft.setCursor(30, 139); tft.print("Card may be locked or not");
     tft.setCursor(30, 152); tft.print("a Gen2/Magic writable card.");
     delay(3000);
-    Blynk.virtualWrite(VP_STATUS, "Idle");
     tft.fillScreen(ST77XX_BLACK); return;
   }
   tft.fillRect(30, 140, 260, 55, 0x2820); tft.drawRect(30, 140, 260, 55, ST77XX_YELLOW);
@@ -853,7 +963,6 @@ void runManualUIDUpdate() {
     tft.setCursor(30, 138); tft.print("a writable Magic/Gen2 card.");
   }
   delay(3000);
-  Blynk.virtualWrite(VP_STATUS, "Idle");
   tft.fillScreen(ST77XX_BLACK);
 }
 
@@ -861,7 +970,6 @@ void runManualUIDUpdate() {
 void runSignalTracker() {
   stopFlag = false; exitFlag = false;
   WiFi.mode(WIFI_STA);
-  Blynk.virtualWrite(VP_STATUS, "Running: Signal Tracker");
   addLog("Signal Tracker started");
   tft.fillScreen(ST77XX_BLACK);
   tft.fillRect(0, 0, 320, 40, ST77XX_GREEN);
@@ -873,7 +981,7 @@ void runSignalTracker() {
   tft.print("'s'=stop  'm'=menu");
 
   String target = getSafeInput();
-  if (target == "m") { tft.fillScreen(ST77XX_BLACK); Blynk.virtualWrite(VP_STATUS, "Idle"); return; }
+  if (target == "m") { tft.fillScreen(ST77XX_BLACK); return; }
   addLog("Tracking SSID: " + target);
   tft.fillScreen(ST77XX_BLACK);
   tft.fillRect(0, 0, 320, 30, ST77XX_GREEN);
@@ -902,14 +1010,12 @@ void runSignalTracker() {
       if (c == 'm' || c == 'M') { exitFlag = true; break; }
       if (c == 's' || c == 'S') { stopFlag = true; break; }
     }
-    Blynk.run();
     if (webServerStarted) server.handleClient();
     delay(100);
   }
   if (stopFlag) addLog("Signal Tracker stopped by user");
   else if (exitFlag) addLog("Signal Tracker exited to menu");
   else addLog("Signal Tracker finished");
-  Blynk.virtualWrite(VP_STATUS, "Idle");
   tft.fillScreen(ST77XX_BLACK);
 }
 
@@ -922,7 +1028,6 @@ void snifferCallback(void* buf, wifi_promiscuous_pkt_type_t type) {
 void runTargetSniffer() {
   stopFlag = false; exitFlag = false;
   pktCount = 0;
-  Blynk.virtualWrite(VP_STATUS, "Running: Sniffer");
   addLog("Sniffer started");
   tft.fillScreen(ST77XX_BLACK);
   tft.fillRect(0, 0, 320, 40, ST77XX_BLUE);
@@ -941,7 +1046,6 @@ void runTargetSniffer() {
     tft.fillRect(0, 0, 320, 40, ST77XX_RED);
     drawCenteredText(10, "NO NETWORKS", ST77XX_WHITE, 2);
     delay(2000);
-    Blynk.virtualWrite(VP_STATUS, "Idle");
     tft.fillScreen(ST77XX_BLACK); return;
   }
   for (int i = 0; i < n && i < 10; i++) {
@@ -949,11 +1053,10 @@ void runTargetSniffer() {
   }
   Serial.print("Select network number (1-10): ");
   String choice = getSafeInput();
-  if (choice == "m") { tft.fillScreen(ST77XX_BLACK); Blynk.virtualWrite(VP_STATUS, "Idle"); return; }
+  if (choice == "m") { tft.fillScreen(ST77XX_BLACK); return; }
   int idx = choice.toInt() - 1;
   if (idx < 0 || idx >= n) {
     addLog("Invalid choice");
-    Blynk.virtualWrite(VP_STATUS, "Idle");
     tft.fillScreen(ST77XX_BLACK); return;
   }
   String bssid = WiFi.BSSIDstr(idx);
@@ -985,7 +1088,6 @@ void runTargetSniffer() {
       if (c == 'm' || c == 'M') { exitFlag = true; break; }
       if (c == 's' || c == 'S') { stopFlag = true; break; }
     }
-    Blynk.run();
     if (webServerStarted) server.handleClient();
     delay(50);
   }
@@ -993,7 +1095,6 @@ void runTargetSniffer() {
   if (stopFlag) addLog("Sniffer stopped by user");
   else if (exitFlag) addLog("Sniffer exited to menu");
   else addLog("Sniffer finished");
-  Blynk.virtualWrite(VP_STATUS, "Idle");
   tft.fillScreen(ST77XX_BLACK);
 }
 
@@ -1239,18 +1340,6 @@ void handleApiStatus() {
   server.send(200, "application/json", json);
 }
 
-// ==================== Blynk Handlers ====================
-BLYNK_WRITE(V0) { if (param.asInt() && !featureRunning) { featureRunning = true; currentFeature = "wifi_scan"; addLog("Blynk: start WiFi Scan"); } }
-BLYNK_WRITE(V1) { if (param.asInt() && !featureRunning) { featureRunning = true; currentFeature = "beacon"; addLog("Blynk: start Beacon"); } }
-BLYNK_WRITE(V2) { if (param.asInt() && !featureRunning) { featureRunning = true; currentFeature = "ble_spam"; addLog("Blynk: start BLE Spam"); } }
-BLYNK_WRITE(V3) { if (param.asInt() && !featureRunning) { featureRunning = true; currentFeature = "ble_track"; addLog("Blynk: start BLE Track"); } }
-BLYNK_WRITE(V4) { if (param.asInt() && !featureRunning) { featureRunning = true; currentFeature = "nfc_read"; addLog("Blynk: start NFC Read"); } }
-BLYNK_WRITE(V5) { if (param.asInt() && !featureRunning) { featureRunning = true; currentFeature = "nfc_clone"; addLog("Blynk: start NFC Clone"); } }
-BLYNK_WRITE(V6) { if (param.asInt() && !featureRunning) { featureRunning = true; currentFeature = "manual_uid"; addLog("Blynk: start Manual UID"); } }
-BLYNK_WRITE(V7) { if (param.asInt() && !featureRunning) { featureRunning = true; currentFeature = "signal_tracker"; addLog("Blynk: start Signal Tracker"); } }
-BLYNK_WRITE(V8) { if (param.asInt() && !featureRunning) { featureRunning = true; currentFeature = "sniffer"; addLog("Blynk: start Sniffer"); } }
-BLYNK_WRITE(V9) { if (param.asInt()) { stopFlag = true; addLog("Blynk: stop command"); } }
-
 // ==================== Setup ====================
 void setup() {
   Serial.begin(115200);
@@ -1262,11 +1351,8 @@ void setup() {
   while (WiFi.status() != WL_CONNECTED && tries < 30) { delay(500); Serial.print("."); tries++; }
   if (WiFi.status() == WL_CONNECTED) {
     addLog("Home Wi‑Fi connected! IP: " + WiFi.localIP().toString());
-    Blynk.config(BLYNK_AUTH_TOKEN);
-    Blynk.connect();
-    addLog("Blynk connected");
   } else {
-    addLog("Home Wi‑Fi failed – Blynk won't work");
+    addLog("Home Wi‑Fi failed");
   }
 
   server.on("/admin", HTTP_GET, handleAdmin);
@@ -1286,7 +1372,6 @@ void setup() {
 
 // ==================== Main Loop ====================
 void loop() {
-  Blynk.run();
   if (webServerStarted) server.handleClient();
 
   if (featureRunning) {
@@ -1302,12 +1387,6 @@ void loop() {
     // Reset state
     featureRunning = false;
     currentFeature = "";
-    Blynk.virtualWrite(V0, 0); Blynk.virtualWrite(V1, 0);
-    Blynk.virtualWrite(V2, 0); Blynk.virtualWrite(V3, 0);
-    Blynk.virtualWrite(V4, 0); Blynk.virtualWrite(V5, 0);
-    Blynk.virtualWrite(V6, 0); Blynk.virtualWrite(V7, 0);
-    Blynk.virtualWrite(V8, 0); Blynk.virtualWrite(V9, 0);
-    Blynk.virtualWrite(VP_STATUS, "Idle");
     drawMenu();
   }
 
