@@ -22,8 +22,8 @@
 #include <BlynkSimpleEsp32.h>
 
 /* ==================== Wi‑Fi Credentials ==================== */
-char ssid[] = " ";
-char pass[] = " ";
+char ssid[] = "yogesh 2.4";
+char pass[] = "12@islington";
 
 /* ==================== SD Card SPI Pins ==================== */
 const int sd_sck  = 18;
