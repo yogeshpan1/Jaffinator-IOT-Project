@@ -1,9 +1,8 @@
 /*
-   JAFFINATOR Multi‑Tool – FINAL RELEASE
-   - AP‑only (JaffAP / 12345678)
-   - Web admin with inline inputs (no pop‑ups)
-   - Improved TFT tool UIs (larger text, better layout)
-   - All 9 tools fully functional
+   JAFFINATOR Multi‑Tool – AP‑Only Version
+   Creates its own Wi‑Fi network "JaffAP" (password 12345678).
+   Connect to that network and open http://192.168.4.1/admin
+   All tools included.
 */
 
 #include <WiFi.h>
@@ -19,7 +18,7 @@
 #include <Adafruit_ST7789.h>
 #include <ctype.h>
 
-// ===== SoftAP Credentials =====
+// ===== SoftAP Credentials (always available) =====
 const char* apSSID = "JaffAP";
 const char* apPass = "12345678";
 
@@ -57,17 +56,17 @@ int logIndex = 0;
 int logCount = 0;
 
 void addLog(String msg) {
-  // Uncomment to see logs in Serial Monitor
+  // Uncomment next line to see logs in Serial Monitor
   // Serial.println(msg);
   logLines[logIndex] = msg;
   logIndex = (logIndex + 1) % MAX_LOG_LINES;
   if (logCount < MAX_LOG_LINES) logCount++;
 }
 
-// ===== Live data for web =====
+// ===== Live data for web panel =====
 String featureDataJson = "{}";
 
-// -------------------- Helpers --------------------
+// -------------------- Helper functions --------------------
 void drawCenteredText(int y, const char* text, uint16_t color, uint8_t size) {
   int16_t x1, y1;
   uint16_t w, h;
@@ -81,11 +80,10 @@ void drawCenteredText(int y, const char* text, uint16_t color, uint8_t size) {
 
 void drawSignalBar(int x, int y, int rssi, uint16_t color) {
   int bars = (rssi > -50) ? 4 : (rssi > -65) ? 3 : (rssi > -80) ? 2 : (rssi > -90) ? 1 : 0;
-  // Wider, taller bars for better visibility
-  tft.fillRect(x, y, 40, 16, ST77XX_BLACK);
+  tft.fillRect(x, y, 25, 12, ST77XX_BLACK);
   for (int i = 0; i < 4; i++) {
-    if (i < bars) tft.fillRect(x + (i * 10), y + (3 - i) * 4, 8, 4, color);
-    else tft.drawRect(x + (i * 10), y + (3 - i) * 4, 8, 4, 0x4208);
+    if (i < bars) tft.fillRect(x + (i * 6), y + (3 - i) * 3, 4, 3, color);
+    else tft.drawRect(x + (i * 6), y + (3 - i) * 3, 4, 3, 0x4208);
   }
 }
 
@@ -118,13 +116,16 @@ String getSafeInput() {
 // ===== Ultra‑fast TFT Home Screen =====
 void drawMenu() {
   tft.fillScreen(ST77XX_BLACK);
+  // Top & bottom green bars
   tft.fillRect(0, 0, 320, 6, ST77XX_GREEN);
   tft.fillRect(0, 234, 320, 6, ST77XX_GREEN);
+  // Title
   tft.setTextSize(4);
   drawCenteredText(70, "JAFFINATOR", ST77XX_GREEN, 4);
   tft.setTextSize(2);
   tft.setTextColor(0x7BEF);
   drawCenteredText(130, "wireless toolkit", 0x7BEF, 2);
+  // IP footer
   tft.setTextSize(1);
   tft.setTextColor(ST77XX_CYAN);
   tft.setCursor(10, 210);
@@ -198,8 +199,7 @@ bool verifyUID(uint8_t *expectedUID, uint8_t expectedLen) {
   return false;
 }
 
-// ==================== Tool implementations (with improved TFT UIs) ====================
-
+// ==================== Tool implementations ====================
 void runWiFiScan() {
   stopFlag = false; exitFlag = false;
   Serial.println("[WiFi Scan] started");
@@ -207,7 +207,7 @@ void runWiFiScan() {
   tft.fillScreen(ST77XX_BLACK);
   tft.fillRect(0, 0, 320, 40, ST77XX_GREEN);
   drawCenteredText(8, "WiFi SCAN", ST77XX_WHITE, 3);
-
+  
   for (int dots = 0; dots < 5 && !stopFlag && !exitFlag; dots++) {
     tft.fillRect(0, 50, 320, 30, ST77XX_BLACK);
     tft.setCursor(10, 55); tft.setTextColor(ST77XX_CYAN); tft.setTextSize(2);
@@ -217,7 +217,7 @@ void runWiFiScan() {
     delay(500);
   }
   if (stopFlag || exitFlag) { tft.fillScreen(ST77XX_BLACK); return; }
-
+  
   int totalNetworks = WiFi.scanNetworks();
   Serial.printf("[WiFi Scan] Found %d networks\n", totalNetworks);
   addLog("Found " + String(totalNetworks) + " networks");
@@ -228,7 +228,7 @@ void runWiFiScan() {
   }
   featureDataJson += "]}";
 
-  int page = 0, perPage = 5;
+  int page = 0, perPage = 6;
   int totalPages = (totalNetworks + perPage - 1) / perPage;
   if (totalPages == 0) totalPages = 1;
   unsigned long lastPageChange = 0;
@@ -238,20 +238,17 @@ void runWiFiScan() {
       tft.fillRect(0, 45, 320, 175, ST77XX_BLACK);
       tft.setCursor(10, 50); tft.setTextColor(ST77XX_CYAN); tft.setTextSize(1);
       tft.printf("Page %d/%d  |  %d APs", page+1, totalPages, totalNetworks);
-      int y = 75;
+      int y = 70;
       int start = page * perPage;
       int end = min(start + perPage, totalNetworks);
       for (int i = start; i < end; i++) {
         String ssid = WiFi.SSID(i);
-        // Show more of the SSID, bigger font
-        if (ssid.length() > 18) ssid = ssid.substring(0, 18) + "..";
-        tft.setTextSize(2); // bigger
-        tft.setCursor(10, y); tft.setTextColor(ST77XX_GREEN); tft.print(ssid);
-        tft.setTextSize(1);
-        tft.setCursor(10, y + 18); tft.setTextColor(ST77XX_WHITE);
-        tft.printf("CH:%2d  %3d dBm", WiFi.channel(i), WiFi.RSSI(i));
-        drawSignalBar(230, y + 4, WiFi.RSSI(i), ST77XX_GREEN);
-        y += 34;
+        if (ssid.length() > 14) ssid = ssid.substring(0, 14) + "..";
+        tft.setCursor(10, y); tft.setTextColor(ST77XX_GREEN); tft.printf("[%d]", i+1);
+        tft.setCursor(40, y); tft.setTextColor(ST77XX_WHITE); tft.print(ssid);
+        tft.setCursor(160, y); tft.printf("CH:%2d %3d dBm", WiFi.channel(i), WiFi.RSSI(i));
+        drawSignalBar(260, y, WiFi.RSSI(i), ST77XX_GREEN);
+        y += 18;
       }
       page = (page + 1) % totalPages;
     }
@@ -347,15 +344,14 @@ void runBLEWindowsSpam() {
   tft.fillScreen(ST77XX_BLACK);
   tft.fillRect(0, 0, 320, 40, ST77XX_RED);
   drawCenteredText(8, "BLE WINDOWS SPAM", ST77XX_WHITE, 3);
-  tft.setCursor(10, 70); tft.setTextColor(ST77XX_CYAN); tft.print("Cycles:");
-  tft.setTextSize(3);
+  tft.setCursor(10, 60); tft.setTextColor(ST77XX_CYAN); tft.print("Cycles:");
   pAdv->start();
   unsigned long count = 0;
   while (!stopFlag && !exitFlag) {
     delay(1000);
     count++;
-    tft.fillRect(150, 60, 150, 30, ST77XX_BLACK);
-    tft.setCursor(150, 65); tft.setTextColor(ST77XX_GREEN); tft.print(count);
+    tft.fillRect(120, 55, 200, 20, ST77XX_BLACK);
+    tft.setCursor(120, 60); tft.setTextColor(ST77XX_GREEN); tft.setTextSize(2); tft.print(count);
     addLog("BLE cycles: " + String(count));
     featureDataJson = "{\"type\":\"ble_spam\",\"cycles\":" + String(count) + ",\"payload\":\"Swift Pair\"}";
     if (webServerStarted) { server.handleClient(); dnsServer.processNextRequest(); }
@@ -391,19 +387,18 @@ void runBLETracker() {
     tft.setCursor(10, 42); tft.setTextColor(ST77XX_CYAN); tft.setTextSize(1);
     tft.printf("Scan #%d  |  %d devices", scanCount, foundDevices->getCount());
     String json = "{\"type\":\"ble_track\",\"scan\":" + String(scanCount) + ",\"devices\":[";
-    int maxDev = min((int)foundDevices->getCount(), 5);
+    int maxDev = min((int)foundDevices->getCount(), 6);
     int y = 60;
     for (int i = 0; i < maxDev; i++) {
       BLEAdvertisedDevice d = foundDevices->getDevice(i);
       String name = d.getName().length() > 0 ? d.getName() : "Unknown";
       if (name.length() > 16) name = name.substring(0, 16) + "..";
-      tft.setCursor(10, y); tft.setTextColor(ST77XX_WHITE); tft.setTextSize(2); tft.print(name);
-      tft.setTextSize(1);
-      tft.setCursor(170, y+2); tft.printf("%d dBm", d.getRSSI());
-      drawSignalBar(250, y-2, d.getRSSI(), d.getRSSI() > -70 ? ST77XX_GREEN : ST77XX_RED);
+      tft.setCursor(10, y); tft.setTextColor(ST77XX_WHITE); tft.print(name);
+      tft.setCursor(180, y); tft.printf("%d dBm", d.getRSSI());
+      drawSignalBar(240, y, d.getRSSI(), d.getRSSI() > -70 ? ST77XX_GREEN : ST77XX_RED);
       if (i > 0) json += ",";
       json += "{\"name\":\"" + name + "\",\"rssi\":" + String(d.getRSSI()) + ",\"mac\":\"" + d.getAddress().toString().c_str() + "\"}";
-      y += 28;
+      y += 24;
     }
     json += "]}";
     featureDataJson = json;
@@ -420,7 +415,6 @@ void runBLETracker() {
   Serial.println("[BLE Tracker] stopped");
 }
 
-// NFC Read / Clone / Manual UID – keep as before (full implementations)
 void runNFCRead() {
   stopFlag = false; exitFlag = false;
   Serial.println("[NFC Read] started");
@@ -449,15 +443,15 @@ void runNFCRead() {
         featureDataJson = "{\"type\":\"nfc\",\"uid\":\"" + uidHex + "\",\"length\":" + String(uidLen) + "}";
         tft.fillRect(0, 50, 320, 190, ST77XX_BLACK);
         tft.setCursor(10, 60); tft.setTextColor(ST77XX_YELLOW); tft.setTextSize(2); tft.print("TAG DETECTED");
-        tft.setCursor(10, 90); tft.setTextColor(ST77XX_WHITE); tft.setTextSize(3); tft.print(uidHex);
-        tft.setCursor(10, 130); tft.setTextColor(ST77XX_CYAN); tft.setTextSize(2); tft.print("Len: "); tft.print(uidLen); tft.print(" bytes");
+        tft.setCursor(10, 90); tft.setTextColor(ST77XX_WHITE); tft.print("UID: "); tft.print(uidHex);
+        tft.setCursor(10, 120); tft.setTextColor(ST77XX_CYAN); tft.print("Len: "); tft.print(uidLen); tft.print(" bytes");
       }
     } else {
       if (cardPresent) {
         cardPresent = false;
         featureDataJson = "{}";
         tft.fillRect(0, 50, 320, 190, ST77XX_BLACK);
-        tft.setCursor(10, 60); tft.setTextColor(ST77XX_CYAN); tft.setTextSize(2); tft.print("Waiting for tag...");
+        tft.setCursor(10, 60); tft.setTextColor(ST77XX_CYAN); tft.setTextSize(1); tft.print("Waiting for tag...");
       }
     }
     if (webServerStarted) { server.handleClient(); dnsServer.processNextRequest(); }
@@ -473,7 +467,6 @@ void runNFCRead() {
 }
 
 void runNFCClone() {
-  // (identical to previous, kept for completeness – full code present)
   stopFlag = false; exitFlag = false;
   Serial.println("[NFC Clone] started");
   nfc.begin(); nfc.SAMConfig();
@@ -818,7 +811,7 @@ void runSignalTracker() {
   stopFlag = false; exitFlag = false;
   String target = webTarget;
   if (target == "") {
-    Serial.println("[Signal Tracker] Enter SSID:");
+    Serial.println("[Signal Tracker] No web target – fallback to serial");
     target = getSafeInput();
     if (target == "m") { tft.fillScreen(ST77XX_BLACK); drawMenu(); return; }
   }
@@ -827,8 +820,8 @@ void runSignalTracker() {
   tft.fillScreen(ST77XX_BLACK);
   tft.fillRect(0, 0, 320, 40, ST77XX_GREEN);
   drawCenteredText(10, "SIGNAL TRACKER", ST77XX_BLACK, 2);
-  tft.setCursor(10, 70); tft.setTextColor(ST77XX_WHITE); tft.setTextSize(3);
-  tft.print(target);
+  tft.setCursor(10, 60); tft.setTextColor(ST77XX_WHITE); tft.setTextSize(2);
+  tft.print("Target: "); tft.print(target);
   unsigned long lastRead = 0;
   while (!stopFlag && !exitFlag) {
     if (millis() - lastRead > 1000) {
@@ -837,10 +830,10 @@ void runSignalTracker() {
       int rssi = -100;
       for (int i = 0; i < n; i++) if (WiFi.SSID(i) == target) { rssi = WiFi.RSSI(i); break; }
       String label = rssi > -50 ? "Excellent" : rssi > -65 ? "Good" : rssi > -80 ? "Fair" : "Poor";
-      tft.fillRect(0, 110, 320, 90, ST77XX_BLACK);
-      tft.setCursor(10, 120); tft.setTextColor(ST77XX_GREEN); tft.setTextSize(3); tft.printf("%d dBm", rssi);
-      tft.setCursor(10, 160); tft.setTextColor(ST77XX_WHITE); tft.setTextSize(2); tft.print(label);
-      drawSignalBar(200, 155, rssi, ST77XX_GREEN);
+      tft.fillRect(0, 90, 320, 120, ST77XX_BLACK);
+      tft.setCursor(10, 100); tft.setTextColor(ST77XX_GREEN); tft.setTextSize(2); tft.printf("RSSI: %d dBm", rssi);
+      tft.setCursor(10, 130); tft.setTextColor(ST77XX_WHITE); tft.printf("Status: %s", label.c_str());
+      drawSignalBar(150, 130, rssi, ST77XX_GREEN);
       featureDataJson = "{\"type\":\"signal\",\"ssid\":\"" + target + "\",\"rssi\":" + String(rssi) + ",\"label\":\"" + label + "\"}";
       addLog("Signal: " + target + " " + String(rssi) + " dBm - " + label);
     }
@@ -887,14 +880,14 @@ void runTargetSniffer() {
   tft.fillScreen(ST77XX_BLACK);
   tft.fillRect(0, 0, 320, 40, ST77XX_BLUE);
   drawCenteredText(10, "SNIFFER", ST77XX_WHITE, 2);
-  tft.setCursor(10, 70); tft.setTextColor(ST77XX_CYAN); tft.setTextSize(2); tft.print(WiFi.SSID(idx));
-  tft.setCursor(10, 110); tft.setTextColor(ST77XX_WHITE); tft.setTextSize(2); tft.print("CH:"); tft.print(targetChannel);
+  tft.setCursor(10, 60); tft.setTextColor(ST77XX_CYAN); tft.print("Target: "); tft.print(WiFi.SSID(idx));
   unsigned long lastUpdate = 0;
   while (!stopFlag && !exitFlag) {
     if (millis() - lastUpdate > 1000) {
       lastUpdate = millis();
-      tft.fillRect(0, 140, 320, 60, ST77XX_BLACK);
-      tft.setCursor(10, 150); tft.setTextColor(ST77XX_GREEN); tft.setTextSize(3); tft.print("Pkts: "); tft.print(pktCount);
+      tft.fillRect(0, 90, 320, 120, ST77XX_BLACK);
+      tft.setCursor(10, 100); tft.setTextColor(ST77XX_GREEN); tft.setTextSize(2); tft.printf("Packets: %lu", pktCount);
+      tft.setCursor(10, 130); tft.setTextColor(ST77XX_WHITE); tft.printf("Channel: %d", targetChannel);
       featureDataJson = "{\"type\":\"sniffer\",\"packets\":" + String(pktCount) + ",\"channel\":" + String(targetChannel) + ",\"target\":\"" + WiFi.SSID(idx) + "\",\"real\":true}";
       addLog("Sniffer packets: " + String(pktCount));
     }
@@ -907,7 +900,7 @@ void runTargetSniffer() {
   Serial.println("[Sniffer] exited");
 }
 
-// ==================== Web Admin (with inline inputs for Signal/Sniffer) ====================
+// ==================== Web Admin ====================
 void handleRoot() {
   server.sendHeader("Location", "/admin", true);
   server.send(302, "text/plain", "");
@@ -1004,15 +997,6 @@ void handleAdmin() {
   .btn.home svg{ fill:var(--amber); }
   .btn.home:hover{ background:rgba(255,176,0,0.1); }
   .btn.refresh{ color:var(--amber); border-color:var(--amber); margin-left:auto; }
-  .input-group{
-    display:flex; align-items:center; gap:4px;
-  }
-  .input-group input{
-    width:100px;
-    background:transparent; border:1px solid var(--green-dim);
-    color:var(--green); font-family:'Share Tech Mono', monospace;
-    padding:4px 6px; font-size:12px;
-  }
   .footer{
     display:flex; justify-content:space-between; align-items:center;
     margin-top:10px; font-size:11px; color:var(--green-dim);
@@ -1064,20 +1048,14 @@ void handleAdmin() {
       <svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-7 5h5v2h-5V7zm0 4h5v2h-5v-2zm-6 4h11v2H7v-2z"/></svg>
       UID
     </button>
-    <div class="input-group">
-      <input type="text" id="signalSSID" placeholder="SSID" maxlength="20">
-      <button class="btn" onclick="runSignal()">
-        <svg viewBox="0 0 24 24"><path d="M3 14h2v6H3v-6zm4-3h2v9H7v-9zm4-4h2v13h-2V7zm4-3h2v16h-2V4z"/></svg>
-        Signal
-      </button>
-    </div>
-    <div class="input-group">
-      <input type="number" id="snifferNet" placeholder="#" min="1" max="10">
-      <button class="btn" onclick="runSniffer()">
-        <svg viewBox="0 0 24 24"><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2zm-2 15l-4-4 1.4-1.4L10 14.2l6.6-6.6L18 9l-8 8z"/></svg>
-        Sniffer
-      </button>
-    </div>
+    <button class="btn" onclick="startSignal()">
+      <svg viewBox="0 0 24 24"><path d="M3 14h2v6H3v-6zm4-3h2v9H7v-9zm4-4h2v13h-2V7zm4-3h2v16h-2V4z"/></svg>
+      Signal
+    </button>
+    <button class="btn" onclick="startSniffer()">
+      <svg viewBox="0 0 24 24"><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2zm-2 15l-4-4 1.4-1.4L10 14.2l6.6-6.6L18 9l-8 8z"/></svg>
+      Sniffer
+    </button>
     <button class="btn home" onclick="goHome()">
       <svg viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
       Home
@@ -1168,18 +1146,18 @@ void handleAdmin() {
     setTimeout(() => { fetchStatus(); fetchLiveData(); }, 300);
   }
 
-  function runSignal() {
-    const ssid = document.getElementById('signalSSID').value.trim();
-    if (ssid) {
-      fetch('/api/run?tool=signal_tracker&target=' + encodeURIComponent(ssid));
+  function startSignal() {
+    let t = prompt("Enter SSID to track:");
+    if (t) {
+      fetch('/api/run?tool=signal_tracker&target=' + encodeURIComponent(t));
       setTimeout(() => { fetchStatus(); fetchLiveData(); }, 300);
     }
   }
 
-  function runSniffer() {
-    const net = document.getElementById('snifferNet').value;
-    if (net && net >= 1 && net <= 10) {
-      fetch('/api/run?tool=sniffer&target=' + net);
+  function startSniffer() {
+    let n = prompt("Enter network number (1-10):");
+    if (n) {
+      fetch('/api/run?tool=sniffer&target=' + n);
       setTimeout(() => { fetchStatus(); fetchLiveData(); }, 300);
     }
   }
@@ -1260,6 +1238,7 @@ void setup() {
   Serial.println("  ╚═══════════════════════════════════════╝\n");
   addLog("=== JAFFINATOR AP ===");
 
+  // AP-only mode – no external Wi‑Fi connection
   WiFi.mode(WIFI_AP);
   WiFi.softAP(apSSID, apPass);
   IPAddress apIP = WiFi.softAPIP();
