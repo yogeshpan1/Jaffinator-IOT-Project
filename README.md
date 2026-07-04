@@ -217,15 +217,20 @@ The project is built using:
 
 ```
 
-/images/menu.jpg
+#### Menu
+![Menu Screen](./images/menu.png)
 
-/images/wifi_scan.jpg
+#### Wi-Fi Scan
+![Wi-Fi Scan Screen](./images/wifi_scan.png)
 
-/images/sniffer.jpg
+#### Sniffer
+![Sniffer Screen](./images/sniffer.png)
 
-/images/nfc.jpg
+#### NFC
+![NFC Screen](./images/nfc.png)
 
-/images/ble.jpg
+#### BLE
+![BLE Screen](./images/ble.png)
 ```
 
 ---
