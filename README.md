@@ -217,11 +217,12 @@ The project is built using:
 
 ```
 
-![Menu](./images/menu.png)
-![Wi-Fi Scan](./images/wifi_scan.png)
-![Sniffer](./images/sniffer.png)
-![NFC](./images/nfc.png)
-![BLE](./images/ble.png)
+![Menu](images/menu.png)
+![Wi-Fi Scan](images/wifi_scan.png)
+![Sniffer](images/sniffer.png)
+![NFC](images/nfc.png)
+![BLE](images/ble.png)
+
 ```
 
 ---
