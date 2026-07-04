@@ -215,15 +215,11 @@ The project is built using:
 
 # 📸 Screenshots
 
-```
-
 ![Menu](images/menu.png)
 ![Wi-Fi Scan](images/wifi_scan.png)
 ![Sniffer](images/sniffer.png)
 ![NFC](images/nfc.png)
 ![BLE](images/ble.png)
-
-```
 
 ---
 
